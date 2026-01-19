@@ -1,0 +1,17 @@
+{
+  "security": {
+    "helmet": true,
+    "compression": true,
+    "xPoweredBy": true,
+    "cors": true,
+    "rateLimit": true,
+    "bodyLimit": false
+  },
+  "validation": {
+    "totalRoutes": 24,
+    "validatedRoutes": 22,
+    "coverage": 92
+  },
+  "health": {},
+  "database": {}
+}

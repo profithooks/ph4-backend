@@ -1,0 +1,54 @@
+{
+  "name": "ph4-backend",
+  "version": "1.0.0",
+  "description": "PH4 Backend API - MERN Stack",
+  "main": "src/server.js",
+  "scripts": {
+    "dev": "PORT=5055 nodemon src/server.js",
+    "start": "node src/server.js",
+    "prove:requests": "node scripts/proveRequests.js",
+    "smoke:dual": "node scripts/smokeDualMode.js",
+    "accept:all": "npm run smoke:dual && npm run prove:requests",
+    "test": "cross-env NODE_ENV=test jest --runInBand",
+    "test:watch": "cross-env NODE_ENV=test jest --watch",
+    "test:ci": "cross-env NODE_ENV=test jest --runInBand --ci",
+    "lint": "eslint .",
+    "seed": "node seed/seedData.js",
+    "load:smoke": "k6 run load-tests/smoke.test.js",
+    "load:normal": "k6 run load-tests/load.test.js",
+    "load:stress": "k6 run load-tests/stress.test.js",
+    "load:all": "npm run load:smoke && npm run load:normal && npm run load:stress"
+  },
+  "keywords": [
+    "express",
+    "mongodb",
+    "mongoose",
+    "jwt",
+    "rest-api"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^1.13.2",
+    "bcryptjs": "^2.4.3",
+    "compression": "^1.7.4",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "express-async-handler": "^1.2.0",
+    "express-rate-limit": "^7.1.5",
+    "helmet": "^7.1.0",
+    "joi": "^17.11.0",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.0.3",
+    "node-cron": "^3.0.3",
+    "winston": "^3.19.0"
+  },
+  "devDependencies": {
+    "cross-env": "^7.0.3",
+    "eslint": "^8.57.0",
+    "jest": "^29.7.0",
+    "nodemon": "^3.0.2",
+    "supertest": "^6.3.3"
+  }
+}

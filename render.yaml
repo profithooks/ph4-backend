@@ -1,0 +1,71 @@
+# ============================================================
+# Render Blueprint for PH4 Backend
+# ============================================================
+# This file configures automatic deployment from GitHub to Render.
+# Learn more: https://render.com/docs/blueprint-spec
+
+services:
+  # Backend API Service
+  - type: web
+    name: ph4-backend
+    runtime: node
+    region: singapore
+    plan: free
+    branch: main
+    buildCommand: npm install
+    startCommand: npm start
+    
+    # Health check endpoint
+    healthCheckPath: /api/health
+    
+    # Auto-deploy on git push
+    autoDeploy: true
+    
+    # Environment variables
+    # Note: Secrets should be set in Render dashboard, not here
+    envVars:
+      - key: NODE_ENV
+        value: production
+      
+      - key: TRUST_PROXY
+        value: true
+      
+      - key: JWT_EXPIRE
+        value: 7d
+      
+      - key: LOG_LEVEL
+        value: info
+      
+      - key: LOG_CONSOLE
+        value: true
+      
+      - key: SENTRY_ENABLED
+        value: true
+      
+      - key: SENTRY_ENVIRONMENT
+        value: production
+      
+      - key: SENTRY_TRACES_SAMPLE_RATE
+        value: "0.1"
+      
+      - key: CORS_CREDENTIALS
+        value: true
+      
+      # IMPORTANT: Add these as secret environment variables in Render dashboard:
+      # - MONGO_URI (MongoDB Atlas connection string)
+      # - JWT_SECRET (generated with: openssl rand -base64 48)
+      # - CORS_ORIGINS (your frontend URLs, comma-separated)
+      # - SENTRY_DSN (from sentry.io, optional)
+
+# ============================================================
+# Deployment Instructions:
+# ============================================================
+# 
+# 1. Push this file to your GitHub repo
+# 2. Go to: https://dashboard.render.com/select-repo
+# 3. Connect your GitHub repo containing this file
+# 4. Render will auto-detect render.yaml and create the service
+# 5. Add secret environment variables in Render dashboard
+# 6. Deploy!
+# 
+# ============================================================
