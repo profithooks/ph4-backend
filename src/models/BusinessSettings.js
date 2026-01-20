@@ -1,5 +1,8 @@
 /**
- * BusinessSettings model - Single source of truth for user business configuration
+ * BusinessSettings Model
+ * 
+ * Business-wide configuration including interest policy
+ * Step 8: Interest Calculation + Financial Year
  */
 const mongoose = require('mongoose');
 
@@ -12,59 +15,161 @@ const businessSettingsSchema = new mongoose.Schema(
       unique: true,
       index: true,
     },
-    recoveryEnabled: {
+    businessId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      index: true,
+    },
+    
+    // Interest Policy
+    interestEnabled: {
       type: Boolean,
       default: false,
     },
-    autoFollowupEnabled: {
-      type: Boolean,
-      default: false,
-    },
-    ledgerEnabled: {
-      type: Boolean,
-      default: true, // Enabled by default (existing feature)
-    },
-    followupCadence: {
-      type: String,
-      enum: ['DAILY', 'WEEKLY', 'CUSTOM'],
-      default: 'DAILY',
-    },
-    escalationDays: {
+    interestRatePctPerMonth: {
       type: Number,
-      default: 7,
-      min: [0, 'Escalation days cannot be negative'],
+      default: 2,
+      min: 0,
+      max: 10, // Safety cap at 10% per month
     },
-    gracePeriodDays: {
+    interestGraceDays: {
       type: Number,
       default: 0,
-      min: [0, 'Grace period days cannot be negative'],
+      min: 0,
+      max: 365,
     },
-    channelsEnabled: {
-      whatsapp: {
+    interestBasis: {
+      type: String,
+      enum: ['DAILY_SIMPLE'],
+      default: 'DAILY_SIMPLE',
+    },
+    interestRounding: {
+      type: String,
+      enum: ['NEAREST_RUPEE'],
+      default: 'NEAREST_RUPEE',
+    },
+    interestCapPctOfPrincipal: {
+      type: Number,
+      default: 100,
+      min: 0,
+      max: 500, // Max 500% of principal
+    },
+    interestApplyOn: {
+      type: String,
+      enum: ['OVERDUE_ONLY'],
+      default: 'OVERDUE_ONLY',
+    },
+    
+    // Financial Year
+    financialYearStartMonth: {
+      type: Number,
+      default: 4, // April (India FY)
+      min: 1,
+      max: 12,
+    },
+    
+    // Step 11: Plan & Billing
+    planName: {
+      type: String,
+      enum: ['FREE', 'PRO'],
+      default: 'FREE',
+    },
+    seatsIncluded: {
+      type: Number,
+      default: 2, // 1 owner + 1 staff
+    },
+    premiumInsightsEnabled: {
+      type: Boolean,
+      default: false,
+    },
+    premiumInsightsCustomerCap: {
+      type: Number,
+      default: 50, // FREE plan limit
+    },
+    planEffectiveAt: Date,
+    planUpdatedAt: Date,
+    
+    // Step 17: Pilot Mode
+    pilotModeEnabled: {
+      type: Boolean,
+      default: false,
+    },
+    pilotModeEnabledAt: Date,
+    pilotModeEnabledBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+    },
+    pilotModeProfile: {
+      type: String,
+      enum: ['KARAD_V1'],
+      default: 'KARAD_V1',
+    },
+    
+    // Step 23: Kill-Switches (Go-Live & Rollout Control)
+    globalKillSwitch: {
+      type: Boolean,
+      default: false,
+    },
+    globalKillSwitchActivatedAt: Date,
+    globalKillSwitchActivatedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+    },
+    featureKillSwitches: {
+      recoveryEngine: {
         type: Boolean,
-        default: true,
+        default: false,
       },
-      sms: {
+      followupEngine: {
+        type: Boolean,
+        default: false,
+      },
+      offlineSync: {
+        type: Boolean,
+        default: false,
+      },
+      notifications: {
+        type: Boolean,
+        default: false,
+      },
+      insights: {
+        type: Boolean,
+        default: false,
+      },
+      backupRestore: {
         type: Boolean,
         default: false,
       },
     },
+    
+    // Audit fields
+    updatedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+    },
   },
   {
     timestamps: true,
-  },
+  }
 );
 
-// Ensure one settings doc per user
+// Indexes
 businessSettingsSchema.index({userId: 1}, {unique: true});
 
-// Index creation logging
-businessSettingsSchema.on('index', (error) => {
-  if (error) {
-    console.error('[BusinessSettings] Index build error:', error);
-  } else {
-    console.log('[BusinessSettings] Indexes built successfully');
+// Helper method to get or create default settings
+businessSettingsSchema.statics.getOrCreate = async function (userId, businessId) {
+  let settings = await this.findOne({userId});
+  
+  if (!settings) {
+    settings = await this.create({
+      userId,
+      businessId: businessId || userId,
+    });
   }
-});
+  
+  return settings;
+};
 
-module.exports = mongoose.model('BusinessSettings', businessSettingsSchema);
+const BusinessSettings = mongoose.model('BusinessSettings', businessSettingsSchema);
+
+module.exports = BusinessSettings;

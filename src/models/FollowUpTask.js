@@ -86,6 +86,23 @@ const followUpTaskSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    
+    // Soft Delete (Step 5: Staff Accountability)
+    isDeleted: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    deletedAt: {
+      type: Date,
+    },
+    deletedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+    },
+    deleteReason: {
+      type: String,
+    },
   },
   {
     timestamps: true,
@@ -95,6 +112,19 @@ const followUpTaskSchema = new mongoose.Schema(
 // Unique index on userId + idempotencyKey to prevent duplicates
 followUpTaskSchema.index({userId: 1, idempotencyKey: 1}, {unique: true});
 
+// RECOVERY LADDER: Additional unique index for recovery tasks (multi-instance safe)
+// Prevents duplicate recovery tasks for same customer+step even if idempotencyKey changes
+followUpTaskSchema.index(
+  {userId: 1, customerId: 1, source: 1},
+  {
+    unique: true,
+    partialFilterExpression: {
+      source: {$regex: /^AUTO_RECOVERY_/},
+      isDeleted: {$ne: true},
+    },
+  }
+);
+
 // Compound indexes for common queries
 followUpTaskSchema.index({userId: 1, status: 1, dueAt: 1}); // Today's tasks, pending tasks
 followUpTaskSchema.index({userId: 1, dueAt: 1}); // Date-based queries (due today, overdue)
@@ -102,6 +132,7 @@ followUpTaskSchema.index({userId: 1, createdAt: -1}); // List all tasks
 followUpTaskSchema.index({customerId: 1, createdAt: -1}); // Customer timeline
 followUpTaskSchema.index({userId: 1, customerId: 1, status: 1}); // Customer's pending tasks
 followUpTaskSchema.index({userId: 1, followupStatus: 1, dueAt: 1}); // Filter by followup status
+followUpTaskSchema.index({source: 1, status: 1, dueAt: 1}); // Recovery task processing (cron)
 
 // Index creation logging
 followUpTaskSchema.on('index', (error) => {

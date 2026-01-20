@@ -92,6 +92,9 @@ recoveryCaseSchema.index({customerId: 1, status: 1}); // Customer recovery statu
 recoveryCaseSchema.index({userId: 1, createdAt: -1}); // List all cases
 recoveryCaseSchema.index({userId: 1, priority: -1, status: 1}); // Priority-based queries
 
+// Step 7: Insights performance indexes
+recoveryCaseSchema.index({userId: 1, status: 1, promiseAt: 1, promiseAmount: 1}); // Cash-in forecast
+
 // Index creation logging
 recoveryCaseSchema.on('index', (error) => {
   if (error) {

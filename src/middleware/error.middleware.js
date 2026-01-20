@@ -2,11 +2,85 @@
  * Error handling middleware - Production hardened
  * 
  * SECURITY: Never leaks stack traces or internal paths to clients in production
+ * RELIABILITY: Logs all failed mutations to ReliabilityEvent for diagnostics
  */
 const AppError = require('../utils/AppError');
 const logger = require('../utils/logger');
+const ReliabilityEvent = require('../models/ReliabilityEvent');
 
 const isDevelopment = process.env.NODE_ENV !== 'production';
+
+/**
+ * Map HTTP status to error category and retryability
+ */
+const classifyError = (statusCode, code) => {
+  // Determine if error is retryable
+  const retryable = statusCode >= 500 || statusCode === 429 || code === 'TIMEOUT';
+  
+  // Map to standard error codes
+  let errorCode = code;
+  
+  if (statusCode === 400) {
+    errorCode = code || 'VALIDATION_ERROR';
+  } else if (statusCode === 401 || statusCode === 403) {
+    errorCode = code || 'AUTH_ERROR';
+  } else if (statusCode === 404) {
+    errorCode = 'NOT_FOUND';
+  } else if (statusCode === 409) {
+    errorCode = 'CONFLICT';
+  } else if (statusCode === 429) {
+    errorCode = 'RATE_LIMIT';
+  } else if (statusCode === 502 || statusCode === 503) {
+    errorCode = 'NETWORK_DEPENDENCY';
+  } else if (statusCode >= 500) {
+    errorCode = 'SERVER_ERROR';
+  }
+  
+  return {code: errorCode, retryable};
+};
+
+/**
+ * Log ReliabilityEvent for failed mutations
+ */
+const logReliabilityEvent = async (req, statusCode, code, message, details) => {
+  // Only log for mutating operations (POST, PUT, PATCH, DELETE)
+  const isMutation = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method);
+  
+  if (!isMutation) {
+    return; // Skip logging for read operations
+  }
+  
+  try {
+    const {code: errorCode, retryable} = classifyError(statusCode, code);
+    
+    // Determine event kind based on route
+    let kind = 'WRITE_FAIL';
+    if (req.path.includes('/followup') || req.path.includes('/recovery')) {
+      kind = 'ENGINE_FAIL';
+    } else if (req.path.includes('/message')) {
+      kind = 'NOTIF_FAIL';
+    }
+    
+    await ReliabilityEvent.create({
+      requestId: req.requestId || 'unknown',
+      at: new Date(),
+      layer: 'backend',
+      kind,
+      route: req.path,
+      method: req.method,
+      userId: req.user?._id || req.user?.id,
+      businessId: req.user?.businessId,
+      code: errorCode,
+      message,
+      details: isDevelopment ? details : undefined, // Only include details in dev
+      retryable,
+      status: statusCode,
+    });
+  } catch (logError) {
+    // Don't let logging errors crash the request
+    logger.error('Failed to log ReliabilityEvent', logError);
+  }
+};
 
 /**
  * Central error handler
@@ -16,7 +90,7 @@ const isDevelopment = process.env.NODE_ENV !== 'production';
  * @param {Response} res - Express response
  * @param {Function} next - Express next function
  */
-const errorHandler = (err, req, res, next) => {
+const errorHandler = async (err, req, res, next) => {
   let statusCode = err.statusCode || 500;
   let message = err.message || 'Server Error';
   let code = err.code || 'SERVER_ERROR';
@@ -27,7 +101,7 @@ const errorHandler = (err, req, res, next) => {
     path: req.path,
     method: req.method,
     userId: req.user?.id,
-    requestId: req.id,
+    requestId: req.requestId,
     statusCode,
     code,
   });
@@ -81,32 +155,56 @@ const errorHandler = (err, req, res, next) => {
     code = 'VALIDATION_ERROR';
   }
 
-  // Build response object
+  // Classify error and determine retryability
+  const {code: errorCode, retryable} = classifyError(statusCode, code);
+  code = errorCode;
+
+  // Build error details for logging
+  const errorDetails = {
+    originalCode: err.code,
+    statusCode,
+    errors,
+  };
+  
+  if (isDevelopment) {
+    errorDetails.stack = err.stack;
+    errorDetails.path = err.path;
+    errorDetails.value = err.value;
+  }
+
+  // Log ReliabilityEvent for failed mutations
+  await logReliabilityEvent(req, statusCode, code, message, errorDetails);
+
+  // Build standardized response envelope
   const response = {
-    success: false,
-    error: message,
-    code,
+    ok: false,
+    requestId: req.requestId || 'unknown',
+    error: {
+      code,
+      message,
+      retryable,
+    },
   };
 
   // Add validation errors if present
   if (errors && errors.length > 0) {
-    response.errors = errors;
+    response.error.details = errors;
   }
 
   // CRITICAL: Never send stack traces or internal details to client in production
   if (isDevelopment) {
     // Development: Include helpful debugging info
-    response.stack = err.stack;
-    response.originalError = err.message;
-    if (err.path) response.path = err.path;
-    if (err.value) response.value = err.value;
+    response.error.stack = err.stack;
+    response.error.originalError = err.message;
+    if (err.path) response.error.path = err.path;
+    if (err.value) response.error.value = err.value;
   } else {
     // Production: Generic message for 500 errors to avoid leaking internals
     if (statusCode === 500) {
-      response.error = 'Internal server error';
-      response.code = 'INTERNAL_ERROR';
+      response.error.message = 'Internal server error';
+      response.error.code = 'INTERNAL_ERROR';
       // Remove any error details that might leak sensitive info
-      delete response.errors;
+      delete response.error.details;
     }
   }
 

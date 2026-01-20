@@ -11,19 +11,21 @@ const Bill = require('../models/Bill');
 const LedgerTransaction = require('../models/LedgerTransaction');
 const FollowUpTask = require('../models/FollowUpTask');
 const AppError = require('../utils/AppError');
+const {auditCreate, auditUpdate, auditDelete} = require('../services/auditHelper.service');
+const {getUserRole} = require('../middleware/permission.middleware');
 
 // @desc    Get all customers
 // @route   GET /api/customers
 // @access  Private
 const getCustomers = asyncHandler(async (req, res) => {
-  const customers = await Customer.find({userId: req.user._id}).sort({
+  const customers = await Customer.find({
+    userId: req.user._id,
+    isDeleted: false, // Step 5: Exclude soft-deleted
+  }).sort({
     createdAt: 1,
   });
 
-  res.json({
-    success: true,
-    data: customers,
-  });
+  res.success(customers);
 });
 
 // @desc    Create customer
@@ -41,37 +43,63 @@ const createCustomer = asyncHandler(async (req, res) => {
     name: name.trim(),
     phone: phone ? phone.trim() : '',
   });
-
-  res.status(201).json({
-    success: true,
-    data: customer,
+  
+  // AUDIT EVENT: Customer Created (Step 5)
+  await auditCreate({
+    action: 'CUSTOMER_CREATED',
+    actorUserId: req.user._id,
+    actorRole: getUserRole(req),
+    entityType: 'CUSTOMER',
+    entity: customer,
+    customerId: customer._id,
+    businessId: req.user.businessId,
+    metadata: {
+      customerName: customer.name,
+    },
+    requestId: req.requestId,
   });
+
+  res.success(customer, 201);
 });
 
 // @desc    Update customer
 // @route   PUT /api/customers/:id
 // @access  Private
 const updateCustomer = asyncHandler(async (req, res) => {
-  let customer = await Customer.findById(req.params.id);
+  // Step 5: Get before state for audit
+  const customerBefore = await Customer.findOne({
+    _id: req.params.id,
+    isDeleted: false,
+  });
 
-  if (!customer) {
+  if (!customerBefore) {
     throw new AppError('Customer not found', 404, 'CUSTOMER_NOT_FOUND');
   }
 
   // Verify ownership
-  if (customer.userId.toString() !== req.user._id.toString()) {
+  if (customerBefore.userId.toString() !== req.user._id.toString()) {
     throw new AppError('Not authorized', 403, 'NOT_AUTHORIZED');
   }
 
-  customer = await Customer.findByIdAndUpdate(req.params.id, req.body, {
+  const customerAfter = await Customer.findByIdAndUpdate(req.params.id, req.body, {
     new: true,
     runValidators: true,
   });
-
-  res.json({
-    success: true,
-    data: customer,
+  
+  // AUDIT EVENT: Customer Updated (Step 5)
+  await auditUpdate({
+    action: 'CUSTOMER_UPDATED',
+    actorUserId: req.user._id,
+    actorRole: getUserRole(req),
+    entityType: 'CUSTOMER',
+    beforeEntity: customerBefore,
+    afterEntity: customerAfter,
+    customerId: customerAfter._id,
+    businessId: req.user.businessId,
+    requestId: req.requestId,
   });
+
+  res.success(customerAfter);
 });
 
 // @desc    Get customer timeline (unified audit/proof view)
@@ -335,9 +363,68 @@ const getCustomerTimeline = asyncHandler(async (req, res) => {
   });
 });
 
+/**
+ * Soft-delete a customer (owner only)
+ * DELETE /api/customers/:id
+ */
+const deleteCustomer = asyncHandler(async (req, res) => {
+  const {id} = req.params;
+  const {reason} = req.body;
+  
+  // Require reason
+  if (!reason || !reason.trim()) {
+    throw new AppError(
+      'Delete reason is required',
+      400,
+      'REASON_REQUIRED'
+    );
+  }
+  
+  // Get customer
+  const customer = await Customer.findOne({
+    _id: id,
+    userId: req.user._id,
+    isDeleted: false,
+  });
+  
+  if (!customer) {
+    throw new AppError('Customer not found', 404, 'CUSTOMER_NOT_FOUND');
+  }
+  
+  // Soft delete
+  customer.isDeleted = true;
+  customer.deletedAt = new Date();
+  customer.deletedBy = req.user._id;
+  customer.deleteReason = reason.trim();
+  
+  await customer.save();
+  
+  // Audit event
+  await auditDelete({
+    action: 'CUSTOMER_DELETED',
+    actorUserId: req.user._id,
+    actorRole: getUserRole(req),
+    entityType: 'CUSTOMER',
+    entity: customer,
+    customerId: customer._id,
+    businessId: req.user.businessId,
+    reason: reason.trim(),
+    metadata: {
+      customerName: customer.name,
+    },
+    requestId: req.requestId,
+  });
+  
+  res.success({
+    message: 'Customer deleted',
+    customerId: customer._id,
+  });
+});
+
 module.exports = {
   getCustomers,
   createCustomer,
   updateCustomer,
   getCustomerTimeline,
+  deleteCustomer,
 };

@@ -54,13 +54,12 @@ exports.addCredit = async (req, res, next) => {
   try {
     const {customerId, amount, note} = req.body;
     const idempotencyKey = getIdempotencyKey(req);
-    const requestId = req.header('X-Request-Id') || 'NO_RID';
-    const uid = req._reqUid || 'NO_UID';
+    const requestId = req.requestId || 'NO_RID';
 
     // Controller entry log (suppress in LOG_FIN_ONLY mode)
     if (process.env.LOG_FIN_ONLY !== 'true') {
       console.log(
-        `CTRL uid=${uid} ledger credit rid=${requestId} idem=${idempotencyKey}`,
+        `CTRL requestId=${requestId} ledger credit idem=${idempotencyKey}`,
       );
     }
 
@@ -161,13 +160,12 @@ exports.addDebit = async (req, res, next) => {
   try {
     const {customerId, amount, note} = req.body;
     const idempotencyKey = getIdempotencyKey(req);
-    const requestId = req.header('X-Request-Id') || 'NO_RID';
-    const uid = req._reqUid || 'NO_UID';
+    const requestId = req.requestId || 'NO_RID';
 
     // Controller entry log (suppress in LOG_FIN_ONLY mode)
     if (process.env.LOG_FIN_ONLY !== 'true') {
       console.log(
-        `CTRL uid=${uid} ledger debit rid=${requestId} idem=${idempotencyKey}`,
+        `CTRL requestId=${requestId} ledger debit idem=${idempotencyKey}`,
       );
     }
 

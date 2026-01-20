@@ -42,6 +42,22 @@ const userSchema = new mongoose.Schema(
       minlength: 6,
       select: false,
     },
+    
+    // Step 9: Trust & Survival - Account Recovery
+    recoveryEnabled: {
+      type: Boolean,
+      default: false,
+    },
+    recoveryPinHash: {
+      type: String,
+      select: false,
+    },
+    recoveryEmail: {
+      type: String,
+      lowercase: true,
+      trim: true,
+    },
+    recoveryUpdatedAt: Date,
   },
   {
     timestamps: true,
@@ -56,6 +72,20 @@ userSchema.pre('save', async function (next) {
   }
   const salt = await bcrypt.genSalt(10);
   this.password = await bcrypt.hash(this.password, salt);
+  next();
+});
+
+// Hash recovery PIN before saving (Step 9)
+userSchema.pre('save', async function (next) {
+  // Skip if recoveryPinHash not modified or doesn't exist
+  if (!this.isModified('recoveryPinHash') || !this.recoveryPinHash) {
+    return next();
+  }
+  // Only hash if it's a plain PIN (not already hashed)
+  if (!this.recoveryPinHash.startsWith('$2')) {
+    const salt = await bcrypt.genSalt(10);
+    this.recoveryPinHash = await bcrypt.hash(this.recoveryPinHash, salt);
+  }
   next();
 });
 

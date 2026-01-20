@@ -1,14 +1,30 @@
 /**
- * Joi validation middleware
+ * DEPRECATED: Joi validation middleware (OLD FORMAT)
+ * 
+ * ⚠️  DO NOT USE THIS FILE - Use validation.middleware.js instead
+ * 
+ * This file returns non-standard envelope: {success:false, message, errors}
+ * Standard envelope: {ok:false, requestId, error:{code, message, retryable, details}}
+ * 
+ * MIGRATION PATH:
+ * - Replace: const {validate} = require('./middleware/validate.middleware');
+ * - With:    const {validate} = require('./middleware/validation.middleware');
+ * 
+ * This file is kept for backward compatibility but will be removed in future.
  */
 
+const logger = require('../utils/logger');
+
 /**
- * Validate request body against Joi schema
- * @param {object} schema - Joi schema object
- * @returns {function} Express middleware
+ * @deprecated Use validation.middleware.js instead
  */
 const validate = (schema) => {
   return (req, res, next) => {
+    logger.warn('[DEPRECATED] Using old validate.middleware.js - migrate to validation.middleware.js', {
+      requestId: req.requestId,
+      path: req.path,
+    });
+    
     const {error, value} = schema.validate(req.body, {
       abortEarly: false,
       stripUnknown: true,
@@ -20,6 +36,7 @@ const validate = (schema) => {
         message: detail.message,
       }));
 
+      // OLD FORMAT (non-standard)
       return res.status(400).json({
         success: false,
         message: 'Validation error',
@@ -27,7 +44,6 @@ const validate = (schema) => {
       });
     }
 
-    // Replace req.body with validated value (stripped unknown fields)
     req.body = value;
     next();
   };

@@ -9,7 +9,9 @@ const {corsOptions, bodyLimits, trustProxy} = require('./config/security');
 const {globalLimiter} = require('./middleware/rateLimit.middleware');
 const errorHandler = require('./middleware/error.middleware');
 const requestUid = require('./middleware/requestUid.middleware');
-const requestLogger = require('./middleware/request-logger.middleware');
+const requestLogger = require('./middleware/requestLogger.middleware'); // UNIFIED: Winston-based structured logging
+const idempotencyMiddleware = require('./middleware/idempotency.middleware');
+const {responseEnvelopeMiddleware} = require('./utils/responseEnvelope');
 const {getSentryRequestHandler, getSentryTracingHandler, getSentryErrorHandler} = require('./config/sentry');
 
 // Route imports
@@ -25,6 +27,19 @@ const attemptRoutes = require('./routes/attempt.routes');
 const messageRoutes = require('./routes/message.routes');
 const settingsRoutes = require('./routes/settings.routes');
 const healthRoutes = require('./routes/health.routes');
+const diagnosticsRoutes = require('./routes/diagnostics.routes');
+const notificationRoutes = require('./routes/notification.routes');
+const auditRoutes = require('./routes/audit.routes');
+const todayRoutes = require('./routes/today.routes');
+const promiseRoutes = require('./routes/promise.routes');
+const insightsRoutes = require('./routes/insights.routes');
+const securityRoutes = require('./routes/security.routes');
+const pilotModeRoutes = require('./routes/pilotMode.routes');
+const opsRoutes = require('./routes/ops.routes');
+
+// Step 23: Go-Live & Rollout Control middleware
+const {checkGlobalKillSwitch, checkFeatureKillSwitches} = require('./middleware/killSwitch.middleware');
+const {checkFeatureFreeze} = require('./middleware/featureFreeze.middleware');
 
 const app = express();
 
@@ -52,6 +67,9 @@ app.use(express.urlencoded({extended: false, limit: bodyLimits.urlencoded}));
 // Request UID generator (must be first)
 app.use(requestUid);
 
+// Response envelope helpers (adds res.success() and res.fail())
+app.use(responseEnvelopeMiddleware);
+
 // Sentry: Request handler (early, before routes)
 // Safe to call even if Sentry not initialized - will be noop
 app.use(getSentryRequestHandler());
@@ -59,11 +77,20 @@ app.use(getSentryRequestHandler());
 // Sentry: Tracing handler (for performance monitoring)
 app.use(getSentryTracingHandler());
 
-// Request logger (logs entry + finish)
+// UNIFIED REQUEST LOGGER: Winston-based structured logging (logs completion with duration, status, errorCode)
+// Replaces console.log-based request-logger.middleware.js
 app.use(requestLogger);
+
+// Idempotency middleware (for offline-first sync)
+app.use(idempotencyMiddleware);
 
 // Security: Global rate limiting for all API routes
 app.use('/api', globalLimiter);
+
+// Step 23: Kill-switch & feature freeze middleware (after auth, before routes)
+app.use('/api', checkGlobalKillSwitch);
+app.use('/api', checkFeatureKillSwitches);
+app.use('/api', checkFeatureFreeze);
 
 // Routes
 app.use('/api', healthRoutes);
@@ -78,6 +105,15 @@ app.use('/api/items', itemRoutes);
 app.use('/api/attempts', attemptRoutes);
 app.use('/api/messages', messageRoutes);
 app.use('/api/settings', settingsRoutes);
+app.use('/api/v1/diagnostics', diagnosticsRoutes);
+app.use('/api/v1/notifications', notificationRoutes);
+app.use('/api/v1/audit', auditRoutes);
+app.use('/api/v1/today', todayRoutes);
+app.use('/api/v1', promiseRoutes);
+app.use('/api/v1/insights', insightsRoutes);
+app.use('/api/v1/security', securityRoutes);
+app.use('/api/v1', pilotModeRoutes);
+app.use('/api/v1/ops', opsRoutes);
 
 // Health check (legacy, kept for backward compatibility)
 app.get('/health', (req, res) => {

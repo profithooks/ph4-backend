@@ -1,13 +1,19 @@
 /**
- * Business settings controller
+ * Settings Controller
+ * 
+ * Business settings including general settings and interest policy
+ * Step 8: Interest Calculation + Financial Year (added interest functions)
  */
+const asyncHandler = require('express-async-handler');
 const BusinessSettings = require('../models/BusinessSettings');
 const AppError = require('../utils/AppError');
+const {getUserRole, isOwner} = require('../middleware/permission.middleware');
+const logger = require('../utils/logger');
 
 /**
- * @route   GET /api/settings
- * @desc    Get business settings for logged-in user (auto-create if missing)
- * @access  Private
+ * GET /api/settings
+ * Get business settings for logged-in user (auto-create if missing)
+ * LEGACY endpoint - kept for backward compatibility
  */
 exports.getSettings = async (req, res, next) => {
   try {
@@ -32,9 +38,9 @@ exports.getSettings = async (req, res, next) => {
 };
 
 /**
- * @route   PUT /api/settings
- * @desc    Update business settings (partial update)
- * @access  Private
+ * PUT /api/settings
+ * Update business settings (partial update)
+ * LEGACY endpoint - kept for backward compatibility
  */
 exports.updateSettings = async (req, res, next) => {
   try {
@@ -153,4 +159,141 @@ exports.updateSettings = async (req, res, next) => {
   } catch (error) {
     next(error);
   }
+};
+
+/**
+ * GET /api/settings/interest-policy
+ * Get interest policy settings
+ * Step 8: Interest Calculation
+ */
+const getInterestPolicy = asyncHandler(async (req, res) => {
+  const userId = req.user._id;
+  const businessId = req.user.businessId || userId;
+  
+  try {
+    const settings = await BusinessSettings.getOrCreate(userId, businessId);
+    
+    res.success({
+      interestEnabled: settings.interestEnabled,
+      interestRatePctPerMonth: settings.interestRatePctPerMonth,
+      interestGraceDays: settings.interestGraceDays,
+      interestBasis: settings.interestBasis,
+      interestRounding: settings.interestRounding,
+      interestCapPctOfPrincipal: settings.interestCapPctOfPrincipal,
+      interestApplyOn: settings.interestApplyOn,
+      financialYearStartMonth: settings.financialYearStartMonth,
+      updatedAt: settings.updatedAt,
+      updatedBy: settings.updatedBy,
+    });
+  } catch (error) {
+    logger.error('[Settings] Get interest policy failed', error);
+    throw error;
+  }
+});
+
+/**
+ * PATCH /api/settings/interest-policy
+ * Update interest policy (owner only)
+ * Step 8: Interest Calculation
+ */
+const updateInterestPolicy = asyncHandler(async (req, res) => {
+  const userId = req.user._id;
+  const businessId = req.user.businessId || userId;
+  const role = getUserRole(req);
+  
+  // Owner only
+  if (!isOwner(role)) {
+    const error = new Error('Owner only');
+    error.statusCode = 403;
+    error.code = 'OWNER_ONLY';
+    throw error;
+  }
+  
+  try {
+    const settings = await BusinessSettings.getOrCreate(userId, businessId);
+    
+    // Update fields
+    const {
+      interestEnabled,
+      interestRatePctPerMonth,
+      interestGraceDays,
+      interestCapPctOfPrincipal,
+      financialYearStartMonth,
+    } = req.body;
+    
+    if (interestEnabled !== undefined) {
+      settings.interestEnabled = Boolean(interestEnabled);
+    }
+    
+    if (interestRatePctPerMonth !== undefined) {
+      const rate = Number(interestRatePctPerMonth);
+      if (isNaN(rate) || rate < 0 || rate > 10) {
+        const error = new Error('Rate must be between 0 and 10% per month');
+        error.statusCode = 400;
+        error.code = 'VALIDATION_ERROR';
+        throw error;
+      }
+      settings.interestRatePctPerMonth = rate;
+    }
+    
+    if (interestGraceDays !== undefined) {
+      const grace = Number(interestGraceDays);
+      if (isNaN(grace) || grace < 0 || grace > 365) {
+        const error = new Error('Grace days must be between 0 and 365');
+        error.statusCode = 400;
+        error.code = 'VALIDATION_ERROR';
+        throw error;
+      }
+      settings.interestGraceDays = grace;
+    }
+    
+    if (interestCapPctOfPrincipal !== undefined) {
+      const cap = Number(interestCapPctOfPrincipal);
+      if (isNaN(cap) || cap < 0 || cap > 500) {
+        const error = new Error('Cap must be between 0 and 500% of principal');
+        error.statusCode = 400;
+        error.code = 'VALIDATION_ERROR';
+        throw error;
+      }
+      settings.interestCapPctOfPrincipal = cap;
+    }
+    
+    if (financialYearStartMonth !== undefined) {
+      const month = Number(financialYearStartMonth);
+      if (isNaN(month) || month < 1 || month > 12) {
+        const error = new Error('FY start month must be between 1 and 12');
+        error.statusCode = 400;
+        error.code = 'VALIDATION_ERROR';
+        throw error;
+      }
+      settings.financialYearStartMonth = month;
+    }
+    
+    settings.updatedBy = userId;
+    await settings.save();
+    
+    logger.info('[Settings] Interest policy updated', {userId, settings: settings.toObject()});
+    
+    res.success({
+      interestEnabled: settings.interestEnabled,
+      interestRatePctPerMonth: settings.interestRatePctPerMonth,
+      interestGraceDays: settings.interestGraceDays,
+      interestBasis: settings.interestBasis,
+      interestRounding: settings.interestRounding,
+      interestCapPctOfPrincipal: settings.interestCapPctOfPrincipal,
+      interestApplyOn: settings.interestApplyOn,
+      financialYearStartMonth: settings.financialYearStartMonth,
+      updatedAt: settings.updatedAt,
+    });
+  } catch (error) {
+    logger.error('[Settings] Update interest policy failed', error);
+    throw error;
+  }
+});
+
+module.exports = {
+  getSettings: exports.getSettings,
+  updateSettings: exports.updateSettings,
+  getInterestPolicy,
+  updateInterestPolicy,
 };

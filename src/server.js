@@ -27,6 +27,9 @@ const app = require('./app');
 const connectDB = require('./config/db');
 const mongoose = require('mongoose');
 const {startMessageDeliveryCron} = require('./cron/messageDelivery.cron');
+const {startNotificationDeliveryCron} = require('./cron/notificationDelivery.cron');
+const {scheduleIntegrityChecks} = require('./cron/integrityCheck.cron');
+const {startRecoveryTaskCron} = require('./cron/recoveryTaskProcessing.cron');
 
 // Connect to database
 connectDB();
@@ -40,6 +43,12 @@ const server = app.listen(PORT, () => {
   
   // Start cron jobs after server is ready
   startMessageDeliveryCron();
+  startNotificationDeliveryCron();
+  scheduleIntegrityChecks();
+  
+  // MULTI-INSTANCE SAFE: Recovery cron uses distributed lock (CronLock model)
+  // Safe to start on all instances - only ONE will execute per interval
+  startRecoveryTaskCron(); // Recovery task processing (every 10 minutes)
 });
 
 // Handle listen errors

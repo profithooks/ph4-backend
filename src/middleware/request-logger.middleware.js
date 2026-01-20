@@ -1,11 +1,30 @@
 /**
- * Request logging middleware
- * Logs every incoming request with fingerprints for tracing
- * Logs once on entry (REQ) and once on finish (FIN)
- *
- * Supports LOG_FIN_ONLY mode for clean test output
+ * DEPRECATED: Console-based request logging middleware
+ * 
+ * ⚠️  DO NOT USE THIS FILE - Use requestLogger.middleware.js instead
+ * 
+ * This file uses console.log which is not structured and hard to parse.
+ * Standard logger: Winston-based requestLogger.middleware.js
+ * 
+ * MIGRATION PATH:
+ * - Replace: const requestLogger = require('./middleware/request-logger.middleware');
+ * - With:    const requestLogger = require('./middleware/requestLogger.middleware');
+ * 
+ * This file is kept for backward compatibility but should not be used.
+ * Only active in NODE_ENV=development for legacy debugging.
+ */
+
+const logger = require('../utils/logger');
+
+/**
+ * @deprecated Use requestLogger.middleware.js instead
  */
 const requestLogger = (req, res, next) => {
+  // Only run in development (gated for production safety)
+  if (process.env.NODE_ENV === 'production') {
+    logger.warn('[DEPRECATED] request-logger.middleware.js used in production - should use requestLogger.middleware.js');
+    return next();
+  }
   const method = req.method;
   const path = req.path;
   const originalUrl = req.originalUrl;

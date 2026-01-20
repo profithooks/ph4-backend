@@ -4,17 +4,24 @@
  */
 const asyncHandler = require('express-async-handler');
 const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
 const User = require('../models/User');
 const OtpAttempt = require('../models/OtpAttempt');
+const AuditEvent = require('../models/AuditEvent');
 const { normalizeE164, isValidE164, maskPhone } = require('../utils/phone');
 const { assertOtpRequestAllowed, assertOtpVerifyAllowed } = require('../services/rateLimit.service');
 const otpService = require('../services/otp/otp.service');
 const { jwtSecret, jwtExpire } = require('../config/env');
 const AppError = require('../utils/AppError');
+const { getOrCreateDevice, verifyDeviceTrusted } = require('../services/device.service');
 
-// Generate JWT token (same as existing auth)
-const generateToken = (id) => {
-  return jwt.sign({ id }, jwtSecret, {
+// Generate JWT token (Step 9: include deviceId)
+const generateToken = (id, deviceId = null) => {
+  const payload = { id };
+  if (deviceId) {
+    payload.deviceId = deviceId;
+  }
+  return jwt.sign(payload, jwtSecret, {
     expiresIn: jwtExpire,
   });
 };
@@ -212,8 +219,57 @@ const verifyOtp = asyncHandler(async (req, res) => {
     console.log(`[OTP Verify] Existing user logged in: ${maskPhone(phoneE164)}`);
   }
 
-  // Generate JWT token
-  const token = generateToken(user._id);
+  // Step 9: Device binding
+  const deviceId = req.headers['x-device-id'];
+  const deviceName = req.headers['x-device-name'] || 'Unknown Device';
+  const platform = req.headers['x-device-platform'] || 'unknown';
+  const appVersion = req.headers['x-app-version'];
+  
+  if (!deviceId) {
+    throw new AppError(
+      'Device ID required. Please update your app.',
+      400,
+      'DEVICE_ID_REQUIRED'
+    );
+  }
+  
+  // Get or create device
+  const device = await getOrCreateDevice({
+    userId: user._id,
+    businessId: user._id, // For single-user businesses
+    deviceId,
+    deviceMeta: {
+      deviceName,
+      platform,
+      appVersion,
+    },
+  });
+  
+  // Check device status
+  if (device.status === 'BLOCKED') {
+    throw new AppError(
+      'This device has been blocked. Contact support.',
+      403,
+      'DEVICE_BLOCKED'
+    );
+  }
+  
+  if (device.status === 'PENDING') {
+    // Device needs approval
+    throw new AppError(
+      'New device requires owner approval',
+      403,
+      'DEVICE_APPROVAL_REQUIRED',
+      {
+        deviceId: device.deviceId,
+        deviceName: device.deviceName,
+        message: 'This device is awaiting approval. Please approve from your trusted device or use account recovery.',
+      }
+    );
+  }
+  
+  // Device is TRUSTED - generate JWT token with deviceId
+  const token = generateToken(user._id, deviceId);
 
   // Return success with token and user info
   res.status(200).json({
@@ -230,6 +286,294 @@ const verifyOtp = asyncHandler(async (req, res) => {
     },
   });
 });
+
+// Step 9: Recovery flow
+
+// In-memory rate limiter for recovery attempts
+const recoveryAttempts = new Map();
+const RECOVERY_RATE_LIMIT = 5; // Max attempts per phone per hour
+const RECOVERY_RATE_WINDOW = 60 * 60 * 1000; // 1 hour
+
+const checkRecoveryRateLimit = (phoneE164) => {
+  const now = Date.now();
+  const key = phoneE164;
+  
+  if (!recoveryAttempts.has(key)) {
+    recoveryAttempts.set(key, [now]);
+    return true;
+  }
+  
+  const attempts = recoveryAttempts.get(key).filter(t => now - t < RECOVERY_RATE_WINDOW);
+  recoveryAttempts.set(key, attempts);
+  
+  if (attempts.length >= RECOVERY_RATE_LIMIT) {
+    return false;
+  }
+  
+  attempts.push(now);
+  recoveryAttempts.set(key, attempts);
+  return true;
+};
+
+// @desc    Init recovery (check if recovery enabled)
+// @route   POST /api/auth/recover/init
+// @access  Public
+const initRecovery = asyncHandler(async (req, res) => {
+  const { countryCode, phone } = req.body;
+  
+  if (!countryCode || !phone) {
+    throw new AppError(
+      'Please provide countryCode and phone',
+      400,
+      'MISSING_FIELDS'
+    );
+  }
+  
+  // Normalize to E.164
+  let phoneE164;
+  try {
+    phoneE164 = normalizeE164({ countryCode, phone });
+  } catch (error) {
+    throw new AppError(
+      `Invalid phone format: ${error.message}`,
+      400,
+      'INVALID_PHONE'
+    );
+  }
+  
+  // Find user
+  const user = await User.findOne({ phoneE164 }).select('+recoveryEnabled +recoveryPinHash');
+  
+  if (!user) {
+    // Don't reveal if user exists
+    res.status(200).json({
+      success: true,
+      recoveryEnabled: false,
+      method: 'NONE',
+    });
+    return;
+  }
+  
+  res.status(200).json({
+    success: true,
+    recoveryEnabled: user.recoveryEnabled || false,
+    method: user.recoveryEnabled ? 'PIN' : 'NONE',
+    phoneE164Masked: maskPhone(phoneE164),
+  });
+});
+
+// @desc    Verify recovery PIN
+// @route   POST /api/auth/recover/verify
+// @access  Public
+const verifyRecoveryPin = asyncHandler(async (req, res) => {
+  const { countryCode, phone, recoveryPin } = req.body;
+  
+  if (!countryCode || !phone || !recoveryPin) {
+    throw new AppError(
+      'Please provide countryCode, phone, and recoveryPin',
+      400,
+      'MISSING_FIELDS'
+    );
+  }
+  
+  // Normalize to E.164
+  let phoneE164;
+  try {
+    phoneE164 = normalizeE164({ countryCode, phone });
+  } catch (error) {
+    throw new AppError(
+      `Invalid phone format: ${error.message}`,
+      400,
+      'INVALID_PHONE'
+    );
+  }
+  
+  // Rate limit check
+  if (!checkRecoveryRateLimit(phoneE164)) {
+    throw new AppError(
+      'Too many recovery attempts. Try again later.',
+      429,
+      'RATE_LIMIT_EXCEEDED'
+    );
+  }
+  
+  // Find user
+  const user = await User.findOne({ phoneE164 }).select('+recoveryPinHash');
+  
+  if (!user || !user.recoveryEnabled || !user.recoveryPinHash) {
+    throw new AppError(
+      'Recovery not enabled for this account',
+      400,
+      'RECOVERY_NOT_ENABLED'
+    );
+  }
+  
+  // Verify PIN
+  const isMatch = await bcrypt.compare(recoveryPin, user.recoveryPinHash);
+  
+  if (!isMatch) {
+    // Log recovery attempt failure
+    await AuditEvent.create({
+      at: new Date(),
+      businessId: user._id,
+      actorUserId: user._id,
+      actorRole: 'USER',
+      action: 'RECOVERY_ATTEMPT',
+      entityType: 'USER',
+      entityId: user._id,
+      metadata: {
+        success: false,
+        phoneE164Masked: maskPhone(phoneE164),
+      },
+    }).catch(err => console.warn('[Recovery] Audit event creation failed', err));
+    
+    throw new AppError(
+      'Invalid recovery PIN',
+      401,
+      'INVALID_RECOVERY_PIN'
+    );
+  }
+  
+  // PIN verified - generate one-time recovery token (short TTL)
+  const recoveryToken = jwt.sign(
+    { userId: user._id, type: 'recovery' },
+    jwtSecret,
+    { expiresIn: '10m' } // 10 minutes only
+  );
+  
+  // Log successful recovery attempt
+  await AuditEvent.create({
+    at: new Date(),
+    businessId: user._id,
+    actorUserId: user._id,
+    actorRole: 'USER',
+    action: 'RECOVERY_ATTEMPT',
+    entityType: 'USER',
+    entityId: user._id,
+    metadata: {
+      success: true,
+      phoneE164Masked: maskPhone(phoneE164),
+    },
+  }).catch(err => console.warn('[Recovery] Audit event creation failed', err));
+  
+  res.status(200).json({
+    success: true,
+    recoveryToken,
+    message: 'Recovery PIN verified. Use this token to approve your device.',
+    expiresIn: '10m',
+  });
+});
+
+// @desc    Approve device using recovery token
+// @route   POST /api/auth/recover/approve-device
+// @access  Public (with recovery token)
+const approveDeviceWithRecovery = asyncHandler(async (req, res) => {
+  const { recoveryToken } = req.body;
+  const deviceId = req.headers['x-device-id'];
+  const deviceName = req.headers['x-device-name'] || 'Unknown Device';
+  const platform = req.headers['x-device-platform'] || 'unknown';
+  const appVersion = req.headers['x-app-version'];
+  
+  if (!recoveryToken) {
+    throw new AppError(
+      'Recovery token required',
+      400,
+      'MISSING_RECOVERY_TOKEN'
+    );
+  }
+  
+  if (!deviceId) {
+    throw new AppError(
+      'Device ID required',
+      400,
+      'DEVICE_ID_REQUIRED'
+    );
+  }
+  
+  // Verify recovery token
+  let decoded;
+  try {
+    decoded = jwt.verify(recoveryToken, jwtSecret);
+  } catch (error) {
+    throw new AppError(
+      'Invalid or expired recovery token',
+      401,
+      'INVALID_RECOVERY_TOKEN'
+    );
+  }
+  
+  if (decoded.type !== 'recovery') {
+    throw new AppError(
+      'Invalid token type',
+      401,
+      'INVALID_TOKEN_TYPE'
+    );
+  }
+  
+  const userId = decoded.userId;
+  
+  // Get or create device and immediately trust it
+  const device = await getOrCreateDevice({
+    userId,
+    businessId: userId,
+    deviceId,
+    deviceMeta: {
+      deviceName,
+      platform,
+      appVersion,
+    },
+  });
+  
+  // Mark device as TRUSTED
+  device.status = 'TRUSTED';
+  device.approvedBy = userId; // Self-approved via recovery
+  device.approvedAt = new Date();
+  await device.save();
+  
+  // Create audit event
+  await AuditEvent.create({
+    at: new Date(),
+    businessId: userId,
+    actorUserId: userId,
+    actorRole: 'USER',
+    action: 'RECOVERY_SUCCESS',
+    entityType: 'DEVICE',
+    entityId: device._id,
+    metadata: {
+      deviceId: device.deviceId,
+      deviceName: device.deviceName,
+      method: 'RECOVERY_PIN',
+    },
+  }).catch(err => console.warn('[Recovery] Audit event creation failed', err));
+  
+  // Get user info
+  const user = await User.findById(userId);
+  
+  // Generate auth token with deviceId
+  const token = generateToken(user._id, deviceId);
+  
+  res.status(200).json({
+    success: true,
+    message: 'Device approved successfully via recovery',
+    token,
+    user: {
+      id: user._id,
+      name: user.name,
+      email: user.email,
+      phone: user.phone,
+      phoneE164: user.phoneE164,
+      phoneVerified: user.phoneVerified,
+    },
+  });
+});
+
+module.exports = {
+  requestOtp,
+  verifyOtp,
+  initRecovery,
+  verifyRecoveryPin,
+  approveDeviceWithRecovery,
+};
 
 module.exports = {
   requestOtp,

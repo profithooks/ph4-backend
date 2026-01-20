@@ -1,37 +1,46 @@
 /**
- * Settings route validation schemas
+ * Settings Validators
+ * 
+ * Step 12: Production Readiness
  */
 const Joi = require('joi');
 
-/**
- * Validate settings update payload
- */
-const updateSettingsSchema = Joi.object({
-  // Ledger settings
-  ledgerEnabled: Joi.boolean(),
-  
-  // Auto follow-up settings
-  autoFollowupEnabled: Joi.boolean(),
-  autoFollowupDays: Joi.number().integer().min(1).max(365),
-  
-  // Recovery settings
-  recoveryEnabled: Joi.boolean(),
-  recoveryThreshold: Joi.number().min(0),
-  
-  // Notification settings
-  notificationsEnabled: Joi.boolean(),
-  emailNotifications: Joi.boolean(),
-  smsNotifications: Joi.boolean(),
-  
-  // Business settings
-  businessName: Joi.string().max(200),
-  businessPhone: Joi.string().max(15),
-  businessEmail: Joi.string().email().max(100),
-  businessAddress: Joi.string().max(500),
-  
-  // Other settings (flexible)
-}).min(1); // At least one setting must be provided
+const updateInterestPolicySchema = {
+  body: Joi.object({
+    interestEnabled: Joi.boolean(),
+    interestRatePctPerMonth: Joi.number().min(0).max(10),
+    interestGraceDays: Joi.number().integer().min(0).max(90),
+    interestCapPctOfPrincipal: Joi.number().min(0).max(500),
+    financialYearStartMonth: Joi.number().integer().min(1).max(12),
+  }).min(1), // At least one field required
+};
+
+const updateBusinessSettingsSchema = {
+  body: Joi.object({
+    businessName: Joi.string().max(200),
+    ownerName: Joi.string().max(100),
+    phone: Joi.string().regex(/^[0-9]{10,15}$/),
+    email: Joi.string().email(),
+    address: Joi.string().max(500),
+    gstNumber: Joi.string().max(50),
+    // Step 9: Recovery settings
+    recoveryEnabled: Joi.boolean(),
+    recoveryPinHash: Joi.string(),
+    // Step 6: Auto followup settings
+    autoFollowupEnabled: Joi.boolean(),
+    // Channel settings
+    whatsappEnabled: Joi.boolean(),
+    smsEnabled: Joi.boolean(),
+    // Ledger settings
+    ledgerEnabled: Joi.boolean(),
+  }).min(1),
+};
+
+// Alias for backward compatibility
+const updateSettingsSchema = updateBusinessSettingsSchema;
 
 module.exports = {
-  updateSettingsSchema,
+  updateInterestPolicySchema,
+  updateBusinessSettingsSchema,
+  updateSettingsSchema, // Export the alias
 };

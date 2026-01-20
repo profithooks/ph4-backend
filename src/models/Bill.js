@@ -103,6 +103,23 @@ const billSchema = new mongoose.Schema(
       default: null,
       sparse: true,
     },
+    
+    // Soft Delete (Step 5: Staff Accountability)
+    isDeleted: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    deletedAt: {
+      type: Date,
+    },
+    deletedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+    },
+    deleteReason: {
+      type: String,
+    },
   },
   {
     timestamps: true,

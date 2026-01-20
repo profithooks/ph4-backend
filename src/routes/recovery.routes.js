@@ -5,7 +5,7 @@ const express = require('express');
 const recoveryController = require('../controllers/recovery.controller');
 const escalationController = require('../controllers/escalation.controller');
 const {protect} = require('../middleware/auth.middleware');
-const {validate} = require('../middleware/validate.middleware');
+const {validate} = require('../middleware/validation.middleware');
 const {validateObjectId} = require('../middleware/validateObjectId.middleware');
 const {
   openCaseSchema,

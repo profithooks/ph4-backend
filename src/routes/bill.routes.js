@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const {protect} = require('../middleware/auth.middleware');
-const {validate} = require('../middleware/validate.middleware');
+const {validate} = require('../middleware/validation.middleware');
 const {validateObjectId} = require('../middleware/validateObjectId.middleware');
 const {
   createBillSchema,
@@ -15,7 +15,9 @@ const {
   getBill,
   addBillPayment,
   cancelBill,
+  deleteBill,
 } = require('../controllers/bill.controller');
+const {requireOwner} = require('../middleware/permission.middleware');
 
 // All bill routes require authentication
 router.use(protect);
@@ -29,5 +31,8 @@ router.get('/:id', validateObjectId('id'), getBill);
 // Bill actions
 router.patch('/:id/pay', validateObjectId('id'), validate(addPaymentSchema), addBillPayment);
 router.patch('/:id/cancel', validateObjectId('id'), validate(cancelBillSchema), cancelBill);
+
+// Bill deletion (owner only) - Step 5
+router.delete('/:id', validateObjectId('id'), requireOwner, deleteBill);
 
 module.exports = router;

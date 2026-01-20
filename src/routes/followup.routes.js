@@ -2,7 +2,7 @@
  * Follow-up routes
  */
 const express = require('express');
-const {validate} = require('../middleware/validate.middleware');
+const {validate} = require('../middleware/validation.middleware');
 const {validateObjectId} = require('../middleware/validateObjectId.middleware');
 const {
   createTaskSchema,

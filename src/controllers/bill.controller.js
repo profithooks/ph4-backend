@@ -4,6 +4,12 @@ const Customer = require('../models/Customer');
 const Item = require('../models/Item');
 const AppError = require('../utils/AppError');
 const logger = require('../utils/logger');
+const {
+  checkCreditLimit,
+  createAuditEvent,
+} = require('../services/creditControl.service');
+const {auditCreate, auditUpdate, auditDelete} = require('../services/auditHelper.service');
+const {getUserRole} = require('../middleware/permission.middleware');
 
 /**
  * Generate next bill number for user
@@ -31,6 +37,11 @@ const generateBillNo = async userId => {
 /**
  * Create a new bill
  * POST /api/bills
+ * 
+ * ROCKEFELLER-GRADE CREDIT ENFORCEMENT:
+ * - Atomically reserves credit BEFORE bill creation (no race conditions)
+ * - If bill creation fails, credit is rolled back atomically
+ * - Audit trail for all credit decisions (PASSED/BLOCKED/OVERRIDE)
  */
 exports.createBill = async (req, res, next) => {
   try {
@@ -83,6 +94,54 @@ exports.createBill = async (req, res, next) => {
     // Generate bill number
     const billNo = await generateBillNo(userId);
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // ROCKEFELLER-GRADE ATOMIC CREDIT LIMIT ENFORCEMENT
+    // ═══════════════════════════════════════════════════════════════════════
+    
+    const unpaidAmount = grandTotal - (paidAmount || 0);
+    let creditReserved = false;
+    
+    if (unpaidAmount > 0) {
+      const {atomicReserveCredit, atomicReleaseCredit} = require('../services/creditControlAtomic.service');
+      
+      // Check for owner override
+      const ownerOverride = req.headers['x-owner-override'] === 'true';
+      const overrideReason = req.body.overrideReason;
+      
+      // ATOMIC OPERATION: Reserve credit (check + increment in single atomic operation)
+      const reserveResult = await atomicReserveCredit({
+        userId,
+        customerId,
+        delta: unpaidAmount,
+        override: ownerOverride && overrideReason,
+        overrideReason,
+        billId: 'pending', // Will be updated after bill created
+        requestId: req.requestId,
+      });
+      
+      if (!reserveResult.success) {
+        // BLOCKED: Credit limit exceeded
+        // Audit event already logged in atomicReserveCredit
+        
+        throw new AppError(
+          'Credit limit exceeded',
+          409,
+          'CREDIT_LIMIT_EXCEEDED',
+          {
+            ...reserveResult.details,
+            requiredOverride: customer.creditLimitAllowOverride,
+          }
+        );
+      }
+      
+      creditReserved = true;
+      logger.info('[Bill] Credit reserved atomically', {
+        customerId,
+        unpaidAmount,
+        newOutstanding: reserveResult.customer.creditOutstanding,
+      });
+    }
+
     // Process items: upsert catalog items if itemId is missing
     const processedItems = await Promise.all(
       items.map(async item => {
@@ -125,24 +184,51 @@ exports.createBill = async (req, res, next) => {
       })
     );
 
-    // Create bill
-    const bill = await Bill.create({
-      userId,
-      customerId,
-      billNo,
-      items: processedItems,
-      subTotal,
-      discount: discount || 0,
-      tax: tax || 0,
-      grandTotal,
-      paidAmount: paidAmount || 0,
-      dueDate: dueDate || null,
-      notes: notes || '',
-      idempotencyKey: idempotencyKey || null,
-    });
+    // ═══════════════════════════════════════════════════════════════════════
+    // CREATE BILL (with atomic rollback on failure)
+    // ═══════════════════════════════════════════════════════════════════════
+    
+    let bill;
+    try {
+      bill = await Bill.create({
+        userId,
+        customerId,
+        billNo,
+        items: processedItems,
+        subTotal,
+        discount: discount || 0,
+        tax: tax || 0,
+        grandTotal,
+        paidAmount: paidAmount || 0,
+        dueDate: dueDate || null,
+        notes: notes || '',
+        idempotencyKey: idempotencyKey || null,
+      });
+    } catch (billCreateError) {
+      // ROLLBACK: Release reserved credit atomically
+      if (creditReserved) {
+        const {atomicReleaseCredit} = require('../services/creditControlAtomic.service');
+        await atomicReleaseCredit({
+          userId,
+          customerId,
+          delta: unpaidAmount,
+          reason: 'ROLLBACK_BILL_CREATE_FAILED',
+          billId: null,
+          requestId: req.requestId,
+        });
+        
+        logger.warn('[Bill] Credit rollback executed - bill creation failed', {
+          customerId,
+          unpaidAmount,
+          error: billCreateError.message,
+        });
+      }
+      
+      throw billCreateError; // Re-throw original error
+    }
 
     // Auto-create ledger transaction if unpaid amount > 0
-    const unpaidAmount = grandTotal - (paidAmount || 0);
+    // (unpaidAmount already computed for credit limit check above)
     if (unpaidAmount > 0) {
       const ledgerIdempotencyKey = idempotencyKey
         ? `${idempotencyKey}_ledger_credit`
@@ -171,7 +257,27 @@ exports.createBill = async (req, res, next) => {
 
         console.log(`[Bill] Auto-created ledger CREDIT ₹${unpaidAmount} for bill ${billNo}`);
       }
+      
+      // NOTE: Audit events for credit (PASSED/BLOCKED/OVERRIDE) already logged
+      // by atomicReserveCredit service - no duplicate logging needed here
     }
+    
+    // AUDIT EVENT: Bill Created (Step 5)
+    await auditCreate({
+      action: 'BILL_CREATED',
+      actorUserId: userId,
+      actorRole: getUserRole(req),
+      entityType: 'BILL',
+      entity: bill,
+      customerId: bill.customerId,
+      businessId: req.user.businessId,
+      metadata: {
+        billNo: bill.billNo,
+        billAmount: bill.grandTotal,
+        customerName: customer.name,
+      },
+      requestId: req.requestId,
+    });
 
     res.status(201).json({
       success: true,
@@ -203,7 +309,10 @@ exports.listBills = async (req, res, next) => {
     const pageLimit = Math.min(parseInt(limit, 10), 100); // Max 100 per page
 
     // Build filter
-    const filter = {userId};
+    const filter = {
+      userId,
+      isDeleted: false, // Step 5: Exclude soft-deleted bills
+    };
 
     // Status filter
     if (status) {
@@ -532,12 +641,30 @@ exports.addBillPayment = async (req, res, next) => {
       });
     }
 
-    // Update bill
+    // ═══════════════════════════════════════════════════════════════════════
+    // ATOMIC CREDIT RELEASE: Payment reduces outstanding
+    // ═══════════════════════════════════════════════════════════════════════
+    
     const previousPaid = bill.paidAmount;
-    bill.paidAmount = Math.min(bill.paidAmount + amount, bill.grandTotal);
+    const newPaidAmount = Math.min(bill.paidAmount + amount, bill.grandTotal);
+    const actualPaymentAmount = newPaidAmount - previousPaid;
+    
+    // Atomically release credit (payment received)
+    if (actualPaymentAmount > 0) {
+      const {atomicReleaseCredit} = require('../services/creditControlAtomic.service');
+      await atomicReleaseCredit({
+        userId,
+        customerId: bill.customerId,
+        delta: actualPaymentAmount,
+        reason: 'PAYMENT',
+        billId: bill._id,
+        requestId: req.requestId,
+      });
+    }
+    
+    // Update bill
+    bill.paidAmount = newPaidAmount;
     await bill.save();
-
-    const actualPaymentAmount = bill.paidAmount - previousPaid;
 
     // Create ledger debit transaction (payment received)
     await LedgerTransaction.create({
@@ -555,7 +682,7 @@ exports.addBillPayment = async (req, res, next) => {
     });
 
     console.log(
-      `[Bill] Added payment ₹${actualPaymentAmount} to bill ${bill.billNo}, status=${bill.status}`,
+      `[Bill] Payment ₹${actualPaymentAmount} recorded, credit released atomically, status=${bill.status}`,
     );
 
     // Populate customer for response
@@ -579,27 +706,142 @@ exports.cancelBill = async (req, res, next) => {
     const userId = req.user.id;
     const {id} = req.params;
 
-    const bill = await Bill.findOne({_id: id, userId});
-    if (!bill) {
+    const billBefore = await Bill.findOne({
+      _id: id,
+      userId,
+      isDeleted: false, // Step 5: Can't cancel deleted bill
+    });
+    
+    if (!billBefore) {
       throw new AppError('Bill not found', 404, 'NOT_FOUND');
     }
 
-    if (bill.status === 'cancelled') {
+    if (billBefore.status === 'cancelled') {
       return res.status(200).json({
         success: true,
-        data: bill,
+        data: billBefore,
         message: 'Bill already cancelled',
       });
     }
 
-    bill.status = 'cancelled';
-    await bill.save();
+    billBefore.status = 'cancelled';
+    await billBefore.save();
 
-    console.log(`[Bill] Cancelled bill ${bill.billNo}`);
+    console.log(`[Bill] Cancelled bill ${billBefore.billNo}`);
+    
+    // AUDIT EVENT: Bill Status Changed (Step 5)
+    await auditUpdate({
+      action: 'BILL_STATUS_CHANGED',
+      actorUserId: userId,
+      actorRole: getUserRole(req),
+      entityType: 'BILL',
+      beforeEntity: {_id: billBefore._id, status: 'unpaid'}, // Simplified before state
+      afterEntity: billBefore,
+      customerId: billBefore.customerId,
+      businessId: req.user.businessId,
+      metadata: {
+        billNo: billBefore.billNo,
+        statusChange: 'unpaid → cancelled',
+      },
+      requestId: req.requestId,
+    });
 
     res.status(200).json({
       success: true,
-      data: bill,
+      data: billBefore,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Soft-delete a bill (owner only)
+ * DELETE /api/bills/:id
+ */
+exports.deleteBill = async (req, res, next) => {
+  try {
+    const {id} = req.params;
+    const {reason} = req.body;
+    const userId = req.user.id;
+    
+    // Require reason
+    if (!reason || !reason.trim()) {
+      throw new AppError(
+        'Delete reason is required',
+        400,
+        'REASON_REQUIRED'
+      );
+    }
+    
+    // Get bill
+    const bill = await Bill.findOne({
+      _id: id,
+      userId,
+      isDeleted: false,
+    });
+    
+    if (!bill) {
+      throw new AppError('Bill not found', 404, 'NOT_FOUND');
+    }
+    
+    // ═══════════════════════════════════════════════════════════════════════
+    // ATOMIC CREDIT RELEASE: Deleted bill's unpaid amount released
+    // ═══════════════════════════════════════════════════════════════════════
+    
+    const unpaidAmount = bill.grandTotal - bill.paidAmount;
+    if (unpaidAmount > 0) {
+      const {atomicReleaseCredit} = require('../services/creditControlAtomic.service');
+      await atomicReleaseCredit({
+        userId,
+        customerId: bill.customerId,
+        delta: unpaidAmount,
+        reason: 'BILL_DELETED',
+        billId: bill._id,
+        requestId: req.requestId,
+      });
+      
+      logger.info('[Bill] Credit released for deleted bill', {
+        billId: bill._id,
+        unpaidAmount,
+      });
+    }
+    
+    // Soft delete
+    bill.isDeleted = true;
+    bill.deletedAt = new Date();
+    bill.deletedBy = userId;
+    bill.deleteReason = reason.trim();
+    
+    await bill.save();
+    
+    // Audit event
+    await auditDelete({
+      action: 'BILL_DELETED',
+      actorUserId: userId,
+      actorRole: getUserRole(req),
+      entityType: 'BILL',
+      entity: bill,
+      customerId: bill.customerId,
+      businessId: req.user.businessId,
+      reason: reason.trim(),
+      metadata: {
+        billNo: bill.billNo,
+        billAmount: bill.grandTotal,
+      },
+      requestId: req.requestId,
+    });
+    
+    logger.info('[Bill] Bill soft-deleted', {
+      billId: bill._id,
+      billNo: bill.billNo,
+      reason: reason.trim(),
+    });
+    
+    res.json({
+      success: true,
+      message: 'Bill deleted',
+      data: {billId: bill._id},
     });
   } catch (error) {
     next(error);
@@ -613,4 +855,5 @@ module.exports = {
   getBill: exports.getBill,
   addBillPayment: exports.addBillPayment,
   cancelBill: exports.cancelBill,
+  deleteBill: exports.deleteBill,
 };
