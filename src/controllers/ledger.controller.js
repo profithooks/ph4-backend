@@ -4,6 +4,8 @@
 const LedgerTransaction = require('../models/LedgerTransaction');
 const Customer = require('../models/Customer');
 const AppError = require('../utils/AppError');
+const {atomicReserveCredit, atomicReleaseCredit} = require('../services/creditControlAtomic.service');
+const {createAuditEvent} = require('../services/creditControl.service');
 
 /**
  * Get idempotency key from request
@@ -114,16 +116,71 @@ exports.addCredit = async (req, res, next) => {
       return next(new AppError('Customer not found', 404, 'NOT_FOUND'));
     }
 
-    // Create transaction
-    const transaction = await LedgerTransaction.create({
+    // ═══════════════════════════════════════════════════════════════════════
+    // ROCKEFELLER-GRADE ATOMIC CREDIT LIMIT ENFORCEMENT
+    // ═══════════════════════════════════════════════════════════════════════
+    
+    // Check for owner override
+    const ownerOverride = req.headers['x-owner-override'] === 'true';
+    const overrideReason = req.body.overrideReason;
+    
+    // ATOMIC OPERATION: Reserve credit (check + increment in single atomic operation)
+    const reserveResult = await atomicReserveCredit({
       userId: req.user._id,
       customerId,
-      type: 'credit',
-      amount,
-      note: note || '',
-      source: 'manual',
-      idempotencyKey: idempotencyKey || `server_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      delta: amount,
+      override: ownerOverride && overrideReason,
+      overrideReason,
+      billId: null, // Manual ledger transaction (no bill)
+      requestId: req.requestId,
     });
+    
+    if (!reserveResult.success) {
+      // BLOCKED: Credit limit exceeded
+      // Audit event already logged in atomicReserveCredit
+      
+      throw new AppError(
+        'Credit limit exceeded',
+        409,
+        'CREDIT_LIMIT_EXCEEDED',
+        {
+          ...reserveResult.details,
+          requiredOverride: customer.creditLimitAllowOverride,
+        }
+      );
+    }
+
+    // Create transaction (with rollback on failure)
+    let transaction;
+    try {
+      transaction = await LedgerTransaction.create({
+        userId: req.user._id,
+        customerId,
+        type: 'credit',
+        amount,
+        note: note || '',
+        source: 'manual',
+        idempotencyKey: idempotencyKey || `server_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      });
+    } catch (txCreateError) {
+      // ROLLBACK: Release reserved credit atomically
+      await atomicReleaseCredit({
+        userId: req.user._id,
+        customerId,
+        delta: amount,
+        reason: 'ROLLBACK_LEDGER_CREDIT_FAILED',
+        billId: null,
+        requestId: req.requestId,
+      });
+      
+      console.warn('[Ledger] Credit rollback executed - transaction creation failed', {
+        customerId,
+        amount,
+        error: txCreateError.message,
+      });
+      
+      throw txCreateError; // Re-throw original error
+    }
 
     res.status(201).json({
       success: true,
@@ -229,6 +286,38 @@ exports.addDebit = async (req, res, next) => {
       note: note || '',
       source: 'manual',
       idempotencyKey: idempotencyKey || `server_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+    });
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // ROCKEFELLER-GRADE CREDIT RELEASE (Payment Received)
+    // ═══════════════════════════════════════════════════════════════════════
+    
+    // ATOMIC OPERATION: Release credit (decrement outstanding, clamped to 0)
+    await atomicReleaseCredit({
+      userId: req.user._id,
+      customerId,
+      delta: amount,
+      reason: 'PAYMENT',
+      billId: null, // Manual ledger transaction (no bill)
+      requestId: req.requestId,
+    });
+    
+    // AUDIT EVENT: Ledger debit recorded
+    await createAuditEvent({
+      action: 'CREDIT_CHECK_PASSED', // Reusing existing audit action for payment
+      userId: req.user._id,
+      actorRole: 'OWNER',
+      entityType: 'LEDGER',
+      entityId: transaction._id,
+      metadata: {
+        customerId,
+        amount,
+        note: note || '',
+        transactionType: 'debit',
+        reason: 'PAYMENT',
+        outstandingAfter: customer.creditOutstanding - amount, // Approximate (actual value set atomically)
+      },
+      requestId: req.requestId,
     });
 
     res.status(201).json({

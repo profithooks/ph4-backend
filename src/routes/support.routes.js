@@ -7,6 +7,7 @@
 const express = require('express');
 const router = express.Router();
 const {protect} = require('../middleware/auth.middleware');
+const {requireOwner} = require('../middleware/permission.middleware');
 const {
   createTicket,
   getUserTickets,
@@ -48,6 +49,13 @@ router.get('/tickets/:id', getTicketDetails);
  * @access  Private
  */
 router.post('/tickets/:id/messages', addTicketMessage);
+
+/**
+ * @route   PATCH /api/v1/support/tickets/:id/status
+ * @desc    Update ticket status (owner only, alias for admin route)
+ * @access  Private (Owner)
+ */
+router.patch('/tickets/:id/status', requireOwner, updateTicketStatus);
 
 /**
  * ADMIN ROUTES

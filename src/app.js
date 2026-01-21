@@ -17,6 +17,7 @@ const {getSentryRequestHandler, getSentryTracingHandler, getSentryErrorHandler} 
 // Route imports
 const authRoutes = require('./routes/auth.routes');
 // const otpAuthRoutes = require('./routes/otpAuth.routes'); // OTP: Paused - files kept for future use
+const authOtpSimpleRoutes = require('./routes/authOtpSimple.routes'); // Zero-friction OTP auth
 const customerRoutes = require('./routes/customer.routes');
 const ledgerRoutes = require('./routes/ledger.routes');
 const recoveryRoutes = require('./routes/recovery.routes');
@@ -36,6 +37,9 @@ const insightsRoutes = require('./routes/insights.routes');
 const securityRoutes = require('./routes/security.routes');
 const pilotModeRoutes = require('./routes/pilotMode.routes');
 const opsRoutes = require('./routes/ops.routes');
+const supportRoutes = require('./routes/support.routes');
+const specComplianceRoutes = require('./routes/specCompliance.routes');
+const backupRoutes = require('./routes/backup.routes');
 
 // Step 23: Go-Live & Rollout Control middleware
 const {checkGlobalKillSwitch, checkFeatureKillSwitches} = require('./middleware/killSwitch.middleware');
@@ -96,6 +100,7 @@ app.use('/api', checkFeatureFreeze);
 app.use('/api', healthRoutes);
 app.use('/api/auth', authRoutes);
 // app.use('/api/auth/otp', otpAuthRoutes); // OTP: Paused - route disabled
+app.use('/api/v1/auth', authOtpSimpleRoutes); // Zero-friction OTP auth (versioned)
 app.use('/api/customers', customerRoutes);
 app.use('/api/ledger', ledgerRoutes);
 app.use('/api/recovery', recoveryRoutes);
@@ -114,6 +119,9 @@ app.use('/api/v1/insights', insightsRoutes);
 app.use('/api/v1/security', securityRoutes);
 app.use('/api/v1', pilotModeRoutes);
 app.use('/api/v1/ops', opsRoutes);
+app.use('/api/v1/support', supportRoutes);
+app.use('/api/v1/dev', specComplianceRoutes);
+app.use('/api/v1/backup', backupRoutes);
 
 // Health check (legacy, kept for backward compatibility)
 app.get('/health', (req, res) => {

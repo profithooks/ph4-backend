@@ -17,6 +17,7 @@ const addCreditSchema = Joi.object({
   note: Joi.string().max(500).optional().allow(''),
   transactionDate: Joi.date().optional(),
   idempotencyKey: Joi.string().max(200).optional(),
+  overrideReason: Joi.string().max(500).optional(), // Required when x-owner-override header is set
 });
 
 /**

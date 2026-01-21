@@ -6,17 +6,17 @@
  */
 const express = require('express');
 const {getSpecCompliance, getSpecCodes} = require('../controllers/specCompliance.controller');
-const {authenticate} = require('../middleware/auth.middleware');
+const {protect} = require('../middleware/auth.middleware');
 
 const router = express.Router();
 
 // Dev-only guard: Only enable in development
 if (process.env.NODE_ENV === 'development' || process.env.ENABLE_DEV_ENDPOINTS === 'true') {
   // Spec compliance report
-  router.get('/compliance', authenticate, getSpecCompliance);
+  router.get('/compliance', protect, getSpecCompliance);
 
   // Spec codes list
-  router.get('/spec-codes', authenticate, getSpecCodes);
+  router.get('/spec-codes', protect, getSpecCodes);
 } else {
   // In production, return 404
   router.use((req, res) => {

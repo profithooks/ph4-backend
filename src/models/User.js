@@ -8,13 +8,20 @@ const userSchema = new mongoose.Schema(
   {
     name: {
       type: String,
-      required: [true, 'Please provide a name'],
+      required: function() {
+        // Name required only if not OTP-only user
+        return !this.mobile;
+      },
       trim: true,
     },
     email: {
       type: String,
-      required: [true, 'Please provide an email'],
+      required: function() {
+        // Email required only if not OTP-only user  
+        return !this.mobile;
+      },
       unique: true,
+      sparse: true,
       lowercase: true,
       trim: true,
     },
@@ -31,6 +38,23 @@ const userSchema = new mongoose.Schema(
     phoneVerified: {
       type: Boolean,
       default: false,
+    },
+    // OTP-only auth fields
+    mobile: {
+      type: String,
+      unique: true,
+      sparse: true,
+      index: true,
+      trim: true,
+    },
+    countryCode: {
+      type: String,
+      default: '+91',
+    },
+    businessName: {
+      type: String,
+      trim: true,
+      maxlength: 60,
     },
     password: {
       type: String,
