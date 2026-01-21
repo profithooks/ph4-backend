@@ -2,7 +2,7 @@
  * Pro plan activation controller
  */
 const asyncHandler = require('express-async-handler');
-const AppError = require('../utils/appError');
+const AppError = require('../utils/AppError');
 const User = require('../models/User');
 const Subscription = require('../models/Subscription');
 const razorpayService = require('../services/razorpay.service');
