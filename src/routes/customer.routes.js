@@ -18,6 +18,7 @@ const {
 const {getCustomerInterest} = require('../controllers/insights.controller');
 const {requireOwner} = require('../middleware/permission.middleware');
 const {protect} = require('../middleware/auth.middleware');
+const {checkWriteLimit} = require('../middleware/writeLimit.middleware');
 const {validate} = require('../middleware/validation.middleware');
 const {validateObjectId} = require('../middleware/validateObjectId.middleware');
 const {
@@ -29,11 +30,16 @@ const router = express.Router();
 
 router.use(protect);
 
-router.route('/').get(getCustomers).post(validate(createCustomerSchema), createCustomer);
+// GET: read-only, no write limit
+// POST: write operation, enforce limit
+router.route('/')
+  .get(getCustomers)
+  .post(checkWriteLimit, validate(createCustomerSchema), createCustomer);
 
+// PUT/DELETE: write operations, enforce limit
 router.route('/:id')
-  .put(validateObjectId('id'), validate(updateCustomerSchema), updateCustomer)
-  .delete(validateObjectId('id'), requireOwner, deleteCustomer);
+  .put(validateObjectId('id'), checkWriteLimit, validate(updateCustomerSchema), updateCustomer)
+  .delete(validateObjectId('id'), requireOwner, checkWriteLimit, deleteCustomer);
 
 router.route('/:id/timeline').get(validateObjectId('id'), getCustomerTimeline);
 

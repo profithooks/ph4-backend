@@ -344,12 +344,13 @@ async function atomicReleaseCredit({
     }
     
     // ATOMIC DECREMENT: Release credit
-    // $max ensures outstanding never goes negative (INVARIANT ENFORCEMENT)
+    // Use $max with computed value to prevent negative (can't use $inc and $max on same field)
+    const decrementAmount = Math.min(delta, outstandingBefore); // Clamp to available amount
+    
     const updated = await Customer.findOneAndUpdate(
       {_id: customerId, userId},
       {
-        $inc: {creditOutstanding: -delta},
-        $max: {creditOutstanding: 0}, // Clamp to 0 minimum
+        $inc: {creditOutstanding: -decrementAmount},
       },
       {new: true}
     );
@@ -360,7 +361,7 @@ async function atomicReleaseCredit({
     
     // INVARIANT VERIFICATION: Check result
     if (updated.creditOutstanding < 0) {
-      // Should never happen with $max, but double-check
+      // Should never happen with clamped decrement, but double-check
       enforceNonNegativeInvariant(updated.creditOutstanding, 'atomicReleaseCredit', {
         userId,
         customerId,

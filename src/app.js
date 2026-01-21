@@ -18,6 +18,8 @@ const {getSentryRequestHandler, getSentryTracingHandler, getSentryErrorHandler} 
 const authRoutes = require('./routes/auth.routes');
 // const otpAuthRoutes = require('./routes/otpAuth.routes'); // OTP: Paused - files kept for future use
 const authOtpSimpleRoutes = require('./routes/authOtpSimple.routes'); // Zero-friction OTP auth
+const entitlementRoutes = require('./routes/entitlement.routes'); // Freemium entitlement
+const proRoutes = require('./routes/pro.routes'); // Pro plan activation & subscription management
 const customerRoutes = require('./routes/customer.routes');
 const ledgerRoutes = require('./routes/ledger.routes');
 const recoveryRoutes = require('./routes/recovery.routes');
@@ -101,6 +103,8 @@ app.use('/api', healthRoutes);
 app.use('/api/auth', authRoutes);
 // app.use('/api/auth/otp', otpAuthRoutes); // OTP: Paused - route disabled
 app.use('/api/v1/auth', authOtpSimpleRoutes); // Zero-friction OTP auth (versioned)
+app.use('/api/v1/auth', entitlementRoutes); // Freemium entitlement (versioned)
+app.use('/api/v1/pro', proRoutes); // Pro plan activation & subscription (versioned)
 app.use('/api/customers', customerRoutes);
 app.use('/api/ledger', ledgerRoutes);
 app.use('/api/recovery', recoveryRoutes);

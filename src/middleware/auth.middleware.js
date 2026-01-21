@@ -7,6 +7,7 @@ const User = require('../models/User');
 const {jwtSecret} = require('../config/env');
 const AppError = require('../utils/AppError');
 const logger = require('../utils/logger');
+const {checkPlanExpiry} = require('./trialExpiry.middleware');
 
 const protect = asyncHandler(async (req, res, next) => {
   let token;
@@ -38,6 +39,9 @@ const protect = asyncHandler(async (req, res, next) => {
     if (!req.user) {
       throw new AppError('User not found', 404, 'USER_NOT_FOUND');
     }
+
+    // Check plan expiry (trial → free, pro → free if subscription expired)
+    await checkPlanExpiry(req, res, () => {});
 
     next();
   } catch (error) {

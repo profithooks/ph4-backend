@@ -4,6 +4,7 @@
 const express = require('express');
 const {validate} = require('../middleware/validation.middleware');
 const {validateObjectId} = require('../middleware/validateObjectId.middleware');
+const {checkWriteLimit} = require('../middleware/writeLimit.middleware');
 const {
   createTaskSchema,
   autoGenerateSchema,
@@ -30,13 +31,12 @@ Object.entries(handlers).forEach(([name, fn]) => {
 
 router.use(protect);
 
-// List all tasks (optional: filter by customerId via query param)
+// READ endpoints - no write limit
 router.get('/', listAllTasks);
-
-// Get specific customer's tasks
 router.get('/:customerId', validateObjectId('customerId'), getCustomerTasks);
 
-router.post('/', validate(createTaskSchema), createTask);
-router.post('/auto-generate', validate(autoGenerateSchema), autoGenerateFollowups);
+// WRITE endpoints - enforce daily limit for free users
+router.post('/', checkWriteLimit, validate(createTaskSchema), createTask);
+router.post('/auto-generate', checkWriteLimit, validate(autoGenerateSchema), autoGenerateFollowups);
 
 module.exports = router;

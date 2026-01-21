@@ -36,4 +36,6 @@ module.exports = {
   mongoUri: process.env.MONGO_URI || 'mongodb://localhost:27017/ph4',
   jwtSecret: validateJwtSecret(),
   jwtExpire: process.env.JWT_EXPIRE || '7d', // Changed from 30d to 7d for security
+  razorpayKeyId: process.env.RAZORPAY_KEY_ID || '',
+  razorpayKeySecret: process.env.RAZORPAY_KEY_SECRET || '',
 };

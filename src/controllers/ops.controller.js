@@ -1,263 +1,174 @@
 /**
- * Ops Controller
+ * Ops Controller - Internal Operations & Manual Overrides
  * 
- * Live operational metrics for monitoring and control tower
- * Step 23: Go-Live & Rollout Control
+ * SECURITY: These endpoints are for internal use only.
+ * - Non-production: Open for testing
+ * - Production: Requires ADMIN_SECRET header
  */
+
 const asyncHandler = require('express-async-handler');
-const mongoose = require('mongoose');
-const IntegrityReport = require('../models/IntegrityReport');
-const ExportJob = require('../models/ExportJob');
-const ReliabilityEvent = require('../models/ReliabilityEvent');
-const Bill = require('../models/Bill');
-const RecoveryCase = require('../models/RecoveryCase');
-const FollowUpTask = require('../models/FollowUpTask');
-const SupportTicket = require('../models/SupportTicket');
-const NotificationAttempt = require('../models/NotificationAttempt');
-const logger = require('../utils/logger');
+const User = require('../models/User');
+const Subscription = require('../models/Subscription');
 
 /**
- * GET /api/v1/ops/health
- * System health metrics
+ * Manually activate Pro plan for a user
+ * 
+ * POST /ops/users/:id/activate-pro
+ * 
+ * @route   POST /ops/users/:id/activate-pro
+ * @access  Private (Admin only in production)
+ * @desc    Manually upgrade user to Pro (for support/testing)
+ * 
+ * Use cases:
+ * - Testing Pro features
+ * - Comp accounts
+ * - Payment issues (manual resolution)
  */
-const getSystemHealth = asyncHandler(async (req, res) => {
-  const businessId = req.user.businessId;
-  const now = new Date();
-  const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-
-  // Check DB connection
-  const dbUp = mongoose.connection.readyState === 1;
-
-  // Last integrity check
-  const lastIntegrityReport = await IntegrityReport.findOne({ businessId })
-    .sort({ runAt: -1 })
-    .select('runAt status')
-    .lean();
-
-  // Last backup
-  const lastBackup = await ExportJob.findOne({ businessId, status: 'DONE' })
-    .sort({ finishedAt: -1 })
-    .select('finishedAt')
-    .lean();
-
-  // Offline queue depth (from reliability events)
-  const offlineQueueDepth = await ReliabilityEvent.countDocuments({
-    businessId,
-    kind: 'SYNC_FAIL',
-    at: { $gte: twentyFourHoursAgo },
-  });
-
-  // Notification failures (24h)
-  const notificationFailures24h = await NotificationAttempt.countDocuments({
-    businessId,
-    status: 'FAILED',
-    updatedAt: { $gte: twentyFourHoursAgo },
-  });
-
-  // Sync failures (24h)
-  const syncFailures24h = await ReliabilityEvent.countDocuments({
-    businessId,
-    kind: 'SYNC_FAIL',
-    at: { $gte: twentyFourHoursAgo },
-  });
-
-  // Determine overall health status
-  let healthStatus = 'GREEN';
-  const issues = [];
-
-  if (!dbUp) {
-    healthStatus = 'RED';
-    issues.push('Database connection down');
+const activateProManually = asyncHandler(async (req, res) => {
+  const userId = req.params.id;
+  const { durationDays = 30, reason = 'manual_activation' } = req.body;
+  
+  console.log(`[Ops] Manual Pro activation requested for user ${userId}`);
+  
+  // Find user
+  const user = await User.findById(userId);
+  
+  if (!user) {
+    return res.status(404).json({
+      success: false,
+      message: 'User not found',
+    });
   }
-
-  if (lastIntegrityReport?.status === 'FAIL') {
-    healthStatus = healthStatus === 'RED' ? 'RED' : 'AMBER';
-    issues.push('Last integrity check failed');
-  }
-
-  if (notificationFailures24h > 10) {
-    healthStatus = healthStatus === 'RED' ? 'RED' : 'AMBER';
-    issues.push(`${notificationFailures24h} notification failures in 24h`);
-  }
-
-  if (syncFailures24h > 50) {
-    healthStatus = healthStatus === 'RED' ? 'RED' : 'AMBER';
-    issues.push(`${syncFailures24h} sync failures in 24h`);
-  }
-
-  const health = {
-    status: healthStatus,
-    apiUp: true, // If we got here, API is up
-    dbUp,
-    lastIntegrityRunAt: lastIntegrityReport?.runAt || null,
-    lastIntegrityStatus: lastIntegrityReport?.status || null,
-    lastBackupAt: lastBackup?.finishedAt || null,
-    offlineQueueDepth,
-    notificationFailures24h,
-    syncFailures24h,
-    issues: issues.length > 0 ? issues : null,
-  };
-
-  res.success({
-    health,
-    meta: {
-      computedAt: new Date().toISOString(),
-      requestId: req.requestId,
-    },
-  });
-});
-
-/**
- * GET /api/v1/ops/activity
- * Business activity metrics
- */
-const getSystemActivity = asyncHandler(async (req, res) => {
-  const businessId = req.user.businessId;
-  const now = new Date();
-  const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-
-  // Bills created (24h)
-  const billsCreated24h = await Bill.countDocuments({
-    businessId,
-    createdAt: { $gte: twentyFourHoursAgo },
-  });
-
-  // Promises set (24h)
-  const promisesSet24h = await RecoveryCase.countDocuments({
-    businessId,
-    createdAt: { $gte: twentyFourHoursAgo },
-    promiseDueAt: { $exists: true },
-  });
-
-  // Broken promises (24h)
-  const brokenPromises24h = await RecoveryCase.countDocuments({
-    businessId,
-    promiseBroken: true,
-    promiseBrokenAt: { $gte: twentyFourHoursAgo },
-  });
-
-  // Followups executed (24h)
-  const followupsExecuted24h = await FollowUpTask.countDocuments({
-    businessId,
-    updatedAt: { $gte: twentyFourHoursAgo },
-    status: { $in: ['COMPLETED', 'CANCELLED'] },
-  });
-
-  // Support tickets open
-  const supportTicketsOpen = await SupportTicket.countDocuments({
-    businessId,
-    status: { $in: ['OPEN', 'IN_PROGRESS', 'WAITING_ON_CUSTOMER'] },
-  });
-
-  const activity = {
-    billsCreated24h,
-    promisesSet24h,
-    brokenPromises24h,
-    followupsExecuted24h,
-    supportTicketsOpen,
-  };
-
-  res.success({
-    activity,
-    meta: {
-      computedAt: new Date().toISOString(),
-      requestId: req.requestId,
-    },
-  });
-});
-
-/**
- * GET /api/v1/ops/dashboard
- * Combined health + activity for dashboard
- */
-const getDashboard = asyncHandler(async (req, res) => {
-  const businessId = req.user.businessId;
-  const now = new Date();
-  const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-
-  // Run health and activity queries in parallel
-  const [
-    dbUp,
-    lastIntegrityReport,
-    lastBackup,
-    offlineQueueDepth,
-    notificationFailures24h,
-    syncFailures24h,
-    billsCreated24h,
-    promisesSet24h,
-    brokenPromises24h,
-    followupsExecuted24h,
-    supportTicketsOpen,
-  ] = await Promise.all([
-    // Health
-    Promise.resolve(mongoose.connection.readyState === 1),
-    IntegrityReport.findOne({ businessId }).sort({ runAt: -1 }).select('runAt status').lean(),
-    ExportJob.findOne({ businessId, status: 'DONE' }).sort({ finishedAt: -1 }).select('finishedAt').lean(),
-    ReliabilityEvent.countDocuments({ businessId, kind: 'SYNC_FAIL', at: { $gte: twentyFourHoursAgo } }),
-    NotificationAttempt.countDocuments({ businessId, status: 'FAILED', updatedAt: { $gte: twentyFourHoursAgo } }),
-    ReliabilityEvent.countDocuments({ businessId, kind: 'SYNC_FAIL', at: { $gte: twentyFourHoursAgo } }),
+  
+  // Check if already Pro
+  if (user.planStatus === 'pro') {
+    console.log(`[Ops] User ${userId} is already Pro`);
     
-    // Activity
-    Bill.countDocuments({ businessId, createdAt: { $gte: twentyFourHoursAgo } }),
-    RecoveryCase.countDocuments({ businessId, createdAt: { $gte: twentyFourHoursAgo }, promiseDueAt: { $exists: true } }),
-    RecoveryCase.countDocuments({ businessId, promiseBroken: true, promiseBrokenAt: { $gte: twentyFourHoursAgo } }),
-    FollowUpTask.countDocuments({ businessId, updatedAt: { $gte: twentyFourHoursAgo }, status: { $in: ['COMPLETED', 'CANCELLED'] } }),
-    SupportTicket.countDocuments({ businessId, status: { $in: ['OPEN', 'IN_PROGRESS', 'WAITING_ON_CUSTOMER'] } }),
-  ]);
-
-  // Determine overall health status
-  let healthStatus = 'GREEN';
-  const issues = [];
-
-  if (!dbUp) {
-    healthStatus = 'RED';
-    issues.push('Database connection down');
+    // Find active subscription
+    const existingSub = await Subscription.findActiveByUserId(userId);
+    
+    return res.status(200).json({
+      success: true,
+      message: 'User is already Pro',
+      user: {
+        id: user._id,
+        planStatus: user.planStatus,
+        planActivatedAt: user.planActivatedAt,
+      },
+      subscription: existingSub ? {
+        id: existingSub._id,
+        expiresAt: existingSub.expiresAt,
+      } : null,
+    });
   }
-
-  if (lastIntegrityReport?.status === 'FAIL') {
-    healthStatus = healthStatus === 'RED' ? 'RED' : 'AMBER';
-    issues.push('Last integrity check failed');
+  
+  try {
+    // Activate Pro
+    user.planStatus = 'pro';
+    user.planActivatedAt = new Date();
+    await user.save();
+    
+    console.log(`[Ops] User ${userId} upgraded to Pro (manual)`);
+    
+    // Create subscription record
+    const subscription = await Subscription.create({
+      userId: user._id,
+      planId: 'ph4_pro_monthly',
+      provider: 'manual', // Special provider for manual activations
+      status: 'active',
+      startedAt: new Date(),
+      expiresAt: new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000),
+      providerPaymentId: `manual_${Date.now()}`,
+      providerOrderId: `manual_${user._id}`,
+      amountPaid: 0, // Manual activation - no payment
+      currency: 'INR',
+      metadata: {
+        activatedBy: 'manual',
+        reason,
+        timestamp: new Date().toISOString(),
+      },
+    });
+    
+    console.log(`[Ops] Manual subscription created: ${subscription._id}`);
+    
+    return res.status(200).json({
+      success: true,
+      message: 'Pro plan activated manually',
+      user: {
+        id: user._id,
+        email: user.email,
+        mobile: user.mobile,
+        planStatus: user.planStatus,
+        planActivatedAt: user.planActivatedAt,
+      },
+      subscription: {
+        id: subscription._id,
+        expiresAt: subscription.expiresAt,
+        durationDays,
+      },
+    });
+  } catch (error) {
+    console.error('[Ops] Error activating Pro manually:', error);
+    
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to activate Pro',
+      error: error.message,
+    });
   }
+});
 
-  if (notificationFailures24h > 10) {
-    healthStatus = healthStatus === 'RED' ? 'RED' : 'AMBER';
-    issues.push(`${notificationFailures24h} notification failures in 24h`);
+/**
+ * Get user entitlement details (for debugging)
+ * 
+ * GET /ops/users/:id/entitlement
+ * 
+ * @route   GET /ops/users/:id/entitlement
+ * @access  Private (Admin only in production)
+ * @desc    Get detailed entitlement info for debugging
+ */
+const getUserEntitlement = asyncHandler(async (req, res) => {
+  const userId = req.params.id;
+  
+  const user = await User.findById(userId);
+  
+  if (!user) {
+    return res.status(404).json({
+      success: false,
+      message: 'User not found',
+    });
   }
-
-  if (syncFailures24h > 50) {
-    healthStatus = healthStatus === 'RED' ? 'RED' : 'AMBER';
-    issues.push(`${syncFailures24h} sync failures in 24h`);
-  }
-
-  res.success({
-    health: {
-      status: healthStatus,
-      apiUp: true,
-      dbUp,
-      lastIntegrityRunAt: lastIntegrityReport?.runAt || null,
-      lastIntegrityStatus: lastIntegrityReport?.status || null,
-      lastBackupAt: lastBackup?.finishedAt || null,
-      offlineQueueDepth,
-      notificationFailures24h,
-      syncFailures24h,
-      issues: issues.length > 0 ? issues : null,
+  
+  // Ensure daily counter is fresh
+  await user.ensureDailyWriteCounter();
+  
+  // Find active subscription
+  const subscription = await Subscription.findActiveByUserId(userId);
+  
+  return res.status(200).json({
+    success: true,
+    user: {
+      id: user._id,
+      email: user.email,
+      mobile: user.mobile,
+      planStatus: user.planStatus,
+      trialEndsAt: user.trialEndsAt,
+      planActivatedAt: user.planActivatedAt,
+      dailyWriteCount: user.dailyWriteCount,
+      dailyWriteDate: user.dailyWriteDate,
     },
-    activity: {
-      billsCreated24h,
-      promisesSet24h,
-      brokenPromises24h,
-      followupsExecuted24h,
-      supportTicketsOpen,
-    },
-    meta: {
-      computedAt: new Date().toISOString(),
-      requestId: req.requestId,
-    },
+    subscription: subscription ? {
+      id: subscription._id,
+      provider: subscription.provider,
+      status: subscription.status,
+      startedAt: subscription.startedAt,
+      expiresAt: subscription.expiresAt,
+      providerPaymentId: subscription.providerPaymentId,
+    } : null,
   });
 });
 
 module.exports = {
-  getSystemHealth,
-  getSystemActivity,
-  getDashboard,
+  activateProManually,
+  getUserEntitlement,
 };

@@ -1,65 +1,89 @@
 /**
- * Ops Routes
+ * Ops Routes - Internal Operations & Manual Overrides
  * 
- * Operational metrics and monitoring endpoints
- * Step 23: Go-Live & Rollout Control
- * Step 24: Post-Launch Metrics & Feedback Loop
+ * SECURITY:
+ * - Non-production: Open for testing
+ * - Production: Requires X-Admin-Secret header
+ * 
+ * Purpose:
+ * - Manual Pro activations (testing, comps, support)
+ * - Debug endpoints (entitlement inspection)
+ * - System health checks
  */
+
 const express = require('express');
 const router = express.Router();
-const { protect } = require('../middleware/auth.middleware');
-const { requireOwner } = require('../middleware/permission.middleware');
 const {
-  getSystemHealth,
-  getSystemActivity,
-  getDashboard,
+  activateProManually,
+  getUserEntitlement,
 } = require('../controllers/ops.controller');
-const {
-  getWeeklyMetrics,
-  exportWeeklyMetrics,
-} = require('../controllers/opsWeekly.controller');
-
-// All routes require authentication and owner role
-router.use(protect, requireOwner);
 
 /**
- * @route   GET /api/v1/ops/health
- * @desc    Get system health metrics
- * @access  Owner
+ * Admin secret middleware (production only)
+ * 
+ * In production, requires X-Admin-Secret header to match ADMIN_SECRET env var.
+ * In non-production, allows all requests (for testing convenience).
  */
-router.get('/health', getSystemHealth);
+const requireAdminSecret = (req, res, next) => {
+  // In non-production, allow all
+  if (process.env.NODE_ENV !== 'production') {
+    console.log('[Ops] Non-production environment - admin check bypassed');
+    return next();
+  }
+  
+  // In production, verify secret
+  const secret = req.headers['x-admin-secret'];
+  const expectedSecret = process.env.ADMIN_SECRET;
+  
+  if (!expectedSecret) {
+    console.error('[Ops] ADMIN_SECRET not configured in production');
+    return res.status(500).json({
+      success: false,
+      message: 'Admin operations not configured',
+    });
+  }
+  
+  if (secret !== expectedSecret) {
+    console.warn('[Ops] Invalid admin secret attempt');
+    return res.status(403).json({
+      success: false,
+      message: 'Forbidden - Invalid admin secret',
+    });
+  }
+  
+  next();
+};
+
+// Apply admin secret guard to all routes
+router.use(requireAdminSecret);
 
 /**
- * @route   GET /api/v1/ops/activity
- * @desc    Get business activity metrics
- * @access  Owner
+ * Manual Pro activation
+ * 
+ * @route   POST /ops/users/:id/activate-pro
+ * @access  Admin (X-Admin-Secret required in production)
+ * @body    { durationDays?: number, reason?: string }
+ * @desc    Manually upgrade user to Pro
+ * 
+ * Example:
+ * curl -X POST http://localhost:5055/api/v1/ops/users/USER_ID/activate-pro \
+ *   -H "X-Admin-Secret: YOUR_SECRET" \
+ *   -H "Content-Type: application/json" \
+ *   -d '{"durationDays": 30, "reason": "comp_account"}'
  */
-router.get('/activity', getSystemActivity);
+router.post('/users/:id/activate-pro', activateProManually);
 
 /**
- * @route   GET /api/v1/ops/dashboard
- * @desc    Get combined health + activity dashboard
- * @access  Owner
+ * Get user entitlement details (debugging)
+ * 
+ * @route   GET /ops/users/:id/entitlement
+ * @access  Admin (X-Admin-Secret required in production)
+ * @desc    Get detailed entitlement info for debugging
+ * 
+ * Example:
+ * curl http://localhost:5055/api/v1/ops/users/USER_ID/entitlement \
+ *   -H "X-Admin-Secret: YOUR_SECRET"
  */
-router.get('/dashboard', getDashboard);
-
-/**
- * @route   GET /api/v1/ops/weekly
- * @desc    Get weekly KPIs and drift detection
- * @query   from (YYYY-MM-DD, optional)
- * @query   to (YYYY-MM-DD, optional)
- * @access  Owner
- */
-router.get('/weekly', getWeeklyMetrics);
-
-/**
- * @route   GET /api/v1/ops/weekly/export
- * @desc    Export weekly metrics as CSV or JSON
- * @query   from (YYYY-MM-DD, optional)
- * @query   to (YYYY-MM-DD, optional)
- * @query   format (csv|json, default: csv)
- * @access  Owner
- */
-router.get('/weekly/export', exportWeeklyMetrics);
+router.get('/users/:id/entitlement', getUserEntitlement);
 
 module.exports = router;

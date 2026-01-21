@@ -8,6 +8,7 @@ const {
   addDebit,
 } = require('../controllers/ledger.controller');
 const {protect} = require('../middleware/auth.middleware');
+const {checkWriteLimit} = require('../middleware/writeLimit.middleware');
 const {validate} = require('../middleware/validation.middleware');
 const {validateObjectId} = require('../middleware/validateObjectId.middleware');
 const {
@@ -29,8 +30,11 @@ Object.entries(handlers).forEach(([name, fn]) => {
 
 router.use(protect);
 
+// READ endpoint - no write limit
 router.get('/:customerId', validateObjectId('customerId'), getCustomerTransactions);
-router.post('/credit', validate(addCreditSchema), addCredit);
-router.post('/debit', validate(addDebitSchema), addDebit);
+
+// WRITE endpoints - enforce daily limit for free users
+router.post('/credit', checkWriteLimit, validate(addCreditSchema), addCredit);
+router.post('/debit', checkWriteLimit, validate(addDebitSchema), addDebit);
 
 module.exports = router;
