@@ -55,6 +55,17 @@ exports.updateSettings = async (req, res, next) => {
       clientUpdatedAt, // ETag-style conflict detection
     } = req.body;
 
+    // DEV LOG: Instrumentation to trace toggle issues
+    if (process.env.NODE_ENV !== 'production') {
+      logger.debug('[Settings] Update request received', {
+        recoveryEnabled,
+        autoFollowupEnabled,
+        userId: req.user._id,
+        requestId: req.requestId,
+        payload: req.body,
+      });
+    }
+
     // Validate numeric ranges
     if (escalationDays !== undefined && escalationDays < 0) {
       return next(
@@ -86,10 +97,22 @@ exports.updateSettings = async (req, res, next) => {
     const updateFields = {};
 
     if (recoveryEnabled !== undefined) {
-      updateFields.recoveryEnabled = recoveryEnabled;
+      updateFields.recoveryEnabled = Boolean(recoveryEnabled);
+      if (process.env.NODE_ENV !== 'production') {
+        logger.debug('[Settings] Setting recoveryEnabled', {
+          value: updateFields.recoveryEnabled,
+          original: recoveryEnabled,
+        });
+      }
     }
     if (autoFollowupEnabled !== undefined) {
-      updateFields.autoFollowupEnabled = autoFollowupEnabled;
+      updateFields.autoFollowupEnabled = Boolean(autoFollowupEnabled);
+      if (process.env.NODE_ENV !== 'production') {
+        logger.debug('[Settings] Setting autoFollowupEnabled', {
+          value: updateFields.autoFollowupEnabled,
+          original: autoFollowupEnabled,
+        });
+      }
     }
     if (ledgerEnabled !== undefined) {
       updateFields.ledgerEnabled = ledgerEnabled;
@@ -105,11 +128,15 @@ exports.updateSettings = async (req, res, next) => {
     }
     if (channelsEnabled !== undefined) {
       // Handle nested channelsEnabled partial update
+      // Merge with existing channelsEnabled if it exists
+      if (!updateFields.channelsEnabled) {
+        updateFields.channelsEnabled = {};
+      }
       if (channelsEnabled.whatsapp !== undefined) {
-        updateFields['channelsEnabled.whatsapp'] = channelsEnabled.whatsapp;
+        updateFields.channelsEnabled.whatsapp = Boolean(channelsEnabled.whatsapp);
       }
       if (channelsEnabled.sms !== undefined) {
-        updateFields['channelsEnabled.sms'] = channelsEnabled.sms;
+        updateFields.channelsEnabled.sms = Boolean(channelsEnabled.sms);
       }
     }
 
@@ -141,6 +168,16 @@ exports.updateSettings = async (req, res, next) => {
         }
       }
 
+      // Handle nested channelsEnabled update separately if needed
+      if (updateFields.channelsEnabled) {
+        // Merge with existing channelsEnabled
+        const existingChannels = settings.channelsEnabled || {};
+        updateFields.channelsEnabled = {
+          ...existingChannels,
+          ...updateFields.channelsEnabled,
+        };
+      }
+
       // Update existing settings
       settings = await BusinessSettings.findOneAndUpdate(
         {userId: req.user._id},
@@ -150,6 +187,18 @@ exports.updateSettings = async (req, res, next) => {
           runValidators: true,
         },
       );
+    }
+
+    // DEV LOG: Verify persisted values
+    if (process.env.NODE_ENV !== 'production') {
+      logger.debug('[Settings] Update completed', {
+        persisted: {
+          recoveryEnabled: settings.recoveryEnabled,
+          autoFollowupEnabled: settings.autoFollowupEnabled,
+        },
+        updateFields,
+        updatedAt: settings.updatedAt,
+      });
     }
 
     res.status(200).json({

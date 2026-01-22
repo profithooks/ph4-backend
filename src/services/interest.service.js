@@ -12,26 +12,60 @@ const logger = require('../utils/logger');
 /**
  * Compute interest for a single bill
  * 
+ * Enhanced to return detailed interest summary for UI display
+ * 
  * @param {Object} bill - Bill document
  * @param {Object} settings - BusinessSettings
  * @param {Date} asOfDate - Computation date
- * @returns {Object} { principal, interest, overdueDays, graceDays, effectiveDays }
+ * @returns {Object} {
+ *   principalBase,      // Principal amount (unpaid)
+ *   interestAccrued,    // Total interest accrued till now
+ *   interestPerDay,     // Current per-day interest rate
+ *   startsAt,           // When interest starts (dueDate + graceDays)
+ *   daysAccruing,       // Days interest has been accruing (effectiveDays)
+ *   totalWithInterest, // principal + interestAccrued
+ *   overdueDays,        // Total days overdue
+ *   graceDays,          // Grace period days
+ *   effectiveDays,      // Days after grace (same as daysAccruing)
+ *   // Legacy fields for backward compatibility
+ *   principal,          // Same as principalBase
+ *   interest,           // Same as interestAccrued
+ * }
  */
 const computeBillInterest = (bill, settings, asOfDate = new Date()) => {
   // Return zero if interest disabled
   if (!settings.interestEnabled) {
     return {
-      principal: 0,
-      interest: 0,
+      principalBase: 0,
+      interestAccrued: 0,
+      interestPerDay: 0,
+      startsAt: null,
+      daysAccruing: 0,
+      totalWithInterest: 0,
       overdueDays: 0,
       graceDays: 0,
       effectiveDays: 0,
+      // Legacy
+      principal: 0,
+      interest: 0,
     };
   }
   
   // Skip if no due date or not overdue
   if (!bill.dueDate) {
-    return {principal: 0, interest: 0, overdueDays: 0, graceDays: 0, effectiveDays: 0};
+    return {
+      principalBase: 0,
+      interestAccrued: 0,
+      interestPerDay: 0,
+      startsAt: null,
+      daysAccruing: 0,
+      totalWithInterest: 0,
+      overdueDays: 0,
+      graceDays: 0,
+      effectiveDays: 0,
+      principal: 0,
+      interest: 0,
+    };
   }
   
   const dueDate = new Date(bill.dueDate);
@@ -40,47 +74,85 @@ const computeBillInterest = (bill, settings, asOfDate = new Date()) => {
   // Calculate overdue days
   const overdueDays = Math.floor((now - dueDate) / (24 * 60 * 60 * 1000));
   
-  // Not overdue yet
-  if (overdueDays <= 0) {
-    return {principal: 0, interest: 0, overdueDays: 0, graceDays: 0, effectiveDays: 0};
-  }
-  
   // Apply grace period
   const graceDays = settings.interestGraceDays || 0;
   const effectiveDays = Math.max(0, overdueDays - graceDays);
   
-  // No interest if within grace
-  if (effectiveDays <= 0) {
-    return {principal: 0, interest: 0, overdueDays, graceDays, effectiveDays: 0};
-  }
+  // Calculate when interest starts (dueDate + graceDays)
+  const startsAt = new Date(dueDate);
+  startsAt.setDate(startsAt.getDate() + graceDays);
   
   // Calculate principal (unpaid amount)
-  const principal = bill.grandTotal - (bill.paidAmount || 0);
+  const principalBase = bill.grandTotal - (bill.paidAmount || 0);
   
-  if (principal <= 0) {
-    return {principal: 0, interest: 0, overdueDays, graceDays, effectiveDays};
+  // Not overdue yet or no principal
+  if (overdueDays <= 0 || principalBase <= 0) {
+    return {
+      principalBase: Math.round(principalBase),
+      interestAccrued: 0,
+      interestPerDay: 0,
+      startsAt: startsAt.toISOString(),
+      daysAccruing: 0,
+      totalWithInterest: Math.round(principalBase),
+      overdueDays: 0,
+      graceDays,
+      effectiveDays: 0,
+      principal: Math.round(principalBase),
+      interest: 0,
+    };
+  }
+  
+  // No interest if within grace
+  if (effectiveDays <= 0) {
+    return {
+      principalBase: Math.round(principalBase),
+      interestAccrued: 0,
+      interestPerDay: 0,
+      startsAt: startsAt.toISOString(),
+      daysAccruing: 0,
+      totalWithInterest: Math.round(principalBase),
+      overdueDays,
+      graceDays,
+      effectiveDays: 0,
+      principal: Math.round(principalBase),
+      interest: 0,
+    };
   }
   
   // Calculate interest (DAILY_SIMPLE)
   const ratePctPerMonth = settings.interestRatePctPerMonth || 0;
   const dailyRate = (ratePctPerMonth / 100) / 30;
   
-  let interest = principal * dailyRate * effectiveDays;
+  // Per-day interest rate (for display)
+  const interestPerDay = principalBase * dailyRate;
+  
+  // Total interest accrued
+  let interestAccrued = principalBase * dailyRate * effectiveDays;
   
   // Apply cap
   const capPct = settings.interestCapPctOfPrincipal || 100;
-  const maxInterest = principal * (capPct / 100);
-  interest = Math.min(interest, maxInterest);
+  const maxInterest = principalBase * (capPct / 100);
+  interestAccrued = Math.min(interestAccrued, maxInterest);
   
   // Apply rounding (NEAREST_RUPEE)
-  interest = Math.round(interest);
+  interestAccrued = Math.round(interestAccrued);
+  const interestPerDayRounded = Math.round(interestPerDay * 100) / 100; // Round to 2 decimals for display
+  
+  const totalWithInterest = Math.round(principalBase) + interestAccrued;
   
   return {
-    principal: Math.round(principal),
-    interest,
+    principalBase: Math.round(principalBase),
+    interestAccrued,
+    interestPerDay: interestPerDayRounded,
+    startsAt: startsAt.toISOString(),
+    daysAccruing: effectiveDays,
+    totalWithInterest,
     overdueDays,
     graceDays,
     effectiveDays,
+    // Legacy fields
+    principal: Math.round(principalBase),
+    interest: interestAccrued,
   };
 };
 
@@ -137,14 +209,57 @@ const computeCustomerInterest = async (userId, customerId, asOfDate = new Date()
     // Sort by interest desc
     billInterests.sort((a, b) => b.interest - a.interest);
     
+    // Compute per-day interest rate (sum of all bills' per-day rates)
+    let totalInterestPerDay = 0;
+    for (const bill of bills) {
+      const result = computeBillInterest(bill, settings, asOfDate);
+      if (result.principalBase > 0) {
+        totalInterestPerDay += result.interestPerDay;
+      }
+    }
+    totalInterestPerDay = Math.round(totalInterestPerDay * 100) / 100;
+
+    // Compute 7-day projection
+    const projectionDays = 7;
+    let projectedInterest = 0;
+    for (const bill of bills) {
+      const result = computeBillInterest(bill, settings, asOfDate);
+      if (result.principalBase > 0 && result.effectiveDays > 0) {
+        const ratePctPerMonth = settings.interestRatePctPerMonth || 0;
+        const dailyRate = (ratePctPerMonth / 100) / 30;
+        const projectedEffectiveDays = result.effectiveDays + projectionDays;
+        let billProjectedInterest = result.principalBase * dailyRate * projectedEffectiveDays;
+        
+        // Apply cap
+        const capPct = settings.interestCapPctOfPrincipal || 100;
+        const maxInterest = result.principalBase * (capPct / 100);
+        billProjectedInterest = Math.min(billProjectedInterest, maxInterest);
+        billProjectedInterest = Math.round(billProjectedInterest);
+        
+        projectedInterest += billProjectedInterest;
+      }
+    }
+
     return {
       customerId,
       customerName: bills[0]?.customerId?.name || 'Unknown',
       totalPrincipal: Math.round(totalPrincipal),
       totalInterest: Math.round(totalInterest),
+      totalInterestPerDay,
       billCount: billInterests.length,
       maxOverdueDays,
       bills: billInterests.slice(0, 20), // Top 20
+      // Cost of Delay summary (for UI)
+      costOfDelay: {
+        totalPrincipalOverdue: Math.round(totalPrincipal),
+        totalInterestAccrued: Math.round(totalInterest),
+        totalInterestPerDay,
+        next7DaysProjection: {
+          projectedInterest: Math.round(projectedInterest),
+          projectedTotal: Math.round(totalPrincipal + projectedInterest),
+          daysFromNow: projectionDays,
+        },
+      },
       settings: {
         enabled: settings.interestEnabled,
         ratePctPerMonth: settings.interestRatePctPerMonth,

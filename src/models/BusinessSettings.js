@@ -89,6 +89,45 @@ const businessSettingsSchema = new mongoose.Schema(
     planEffectiveAt: Date,
     planUpdatedAt: Date,
     
+    // Step 9: Recovery & Follow-up Engine Settings
+    recoveryEnabled: {
+      type: Boolean,
+      default: false,
+    },
+    autoFollowupEnabled: {
+      type: Boolean,
+      default: false,
+    },
+    ledgerEnabled: {
+      type: Boolean,
+      default: true,
+    },
+    followupCadence: {
+      type: String,
+      enum: ['DAILY', 'WEEKLY', 'CUSTOM'],
+      default: 'DAILY',
+    },
+    escalationDays: {
+      type: Number,
+      default: 7,
+      min: 0,
+    },
+    gracePeriodDays: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    channelsEnabled: {
+      whatsapp: {
+        type: Boolean,
+        default: true,
+      },
+      sms: {
+        type: Boolean,
+        default: false,
+      },
+    },
+    
     // Step 17: Pilot Mode
     pilotModeEnabled: {
       type: Boolean,

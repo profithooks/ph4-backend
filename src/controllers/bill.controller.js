@@ -380,17 +380,53 @@ exports.listBills = async (req, res, next) => {
     const hasMore = bills.length > pageLimit;
     const results = hasMore ? bills.slice(0, pageLimit) : bills;
 
-    // Compute virtual fields manually for lean queries
-    const enrichedResults = results.map(bill => ({
-      ...bill,
-      pendingAmount: Math.max(0, bill.grandTotal - bill.paidAmount),
-      isOverdue:
+    // Get interest settings for interest computation
+    const BusinessSettings = require('../models/BusinessSettings');
+    const interestService = require('../services/interest.service');
+    const settings = await BusinessSettings.getOrCreate(userId);
+    const now = new Date();
+
+    // Compute virtual fields manually for lean queries + interest summary
+    const enrichedResults = results.map(bill => {
+      const pendingAmount = Math.max(0, bill.grandTotal - bill.paidAmount);
+      const isOverdue =
         bill.dueDate &&
         bill.status !== 'paid' &&
         bill.status !== 'cancelled' &&
         new Date(bill.dueDate) < new Date() &&
-        bill.grandTotal - bill.paidAmount > 0,
-    }));
+        pendingAmount > 0;
+
+      // Compute interest summary (only if interest enabled)
+      let interestSummary = null;
+      if (settings.interestEnabled) {
+        const interestResult = interestService.computeBillInterest(bill, settings, now);
+        if (interestResult.interestAccrued > 0) {
+          interestSummary = {
+            interestAccrued: interestResult.interestAccrued,
+            interestPerDay: interestResult.interestPerDay,
+            totalWithInterest: interestResult.totalWithInterest,
+            startsAt: interestResult.startsAt,
+            daysAccruing: interestResult.daysAccruing,
+          };
+        } else {
+          // Include zero interest summary if policy enabled but no interest yet
+          interestSummary = {
+            interestAccrued: 0,
+            interestPerDay: interestResult.interestPerDay,
+            totalWithInterest: interestResult.totalWithInterest,
+            startsAt: interestResult.startsAt,
+            daysAccruing: 0,
+          };
+        }
+      }
+
+      return {
+        ...bill,
+        pendingAmount,
+        isOverdue,
+        interestSummary, // Add interest summary
+      };
+    });
 
     // Generate next cursor
     const nextCursor = hasMore ? results[results.length - 1]._id : null;
@@ -565,6 +601,7 @@ exports.getBillsSummary = async (req, res, next) => {
 /**
  * Get single bill
  * GET /api/bills/:id
+ * Includes interest detail when interest policy is enabled
  */
 exports.getBill = async (req, res, next) => {
   try {
@@ -579,9 +616,62 @@ exports.getBill = async (req, res, next) => {
       throw new AppError('Bill not found', 404, 'NOT_FOUND');
     }
 
+    // Get interest settings and compute interest detail
+    const BusinessSettings = require('../models/BusinessSettings');
+    const interestService = require('../services/interest.service');
+    const settings = await BusinessSettings.getOrCreate(userId);
+    const now = new Date();
+
+    // Compute interest detail
+    let interestDetail = null;
+    if (settings.interestEnabled) {
+      const interestResult = interestService.computeBillInterest(bill, settings, now);
+      
+      interestDetail = {
+        enabled: true,
+        policy: {
+          ratePctPerMonth: settings.interestRatePctPerMonth,
+          graceDays: settings.interestGraceDays,
+          capPctOfPrincipal: settings.interestCapPctOfPrincipal,
+          basis: settings.interestBasis,
+          rounding: settings.interestRounding,
+        },
+        computation: {
+          principalBase: interestResult.principalBase,
+          interestAccrued: interestResult.interestAccrued,
+          interestPerDay: interestResult.interestPerDay,
+          totalWithInterest: interestResult.totalWithInterest,
+          startsAt: interestResult.startsAt,
+          daysAccruing: interestResult.daysAccruing,
+          overdueDays: interestResult.overdueDays,
+          graceDays: interestResult.graceDays,
+        },
+        computedAt: now.toISOString(),
+      };
+    } else {
+      interestDetail = {
+        enabled: false,
+        policy: null,
+        computation: {
+          principalBase: Math.max(0, bill.grandTotal - (bill.paidAmount || 0)),
+          interestAccrued: 0,
+          interestPerDay: 0,
+          totalWithInterest: Math.max(0, bill.grandTotal - (bill.paidAmount || 0)),
+          startsAt: null,
+          daysAccruing: 0,
+          overdueDays: 0,
+          graceDays: 0,
+        },
+        computedAt: now.toISOString(),
+      };
+    }
+
     res.status(200).json({
       success: true,
-      data: bill,
+      data: {
+        ...bill,
+        interestDetail, // Add interest detail
+      },
     });
   } catch (error) {
     next(error);

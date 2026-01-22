@@ -114,6 +114,12 @@ const getDailyChaseList = asyncHandler(async (req, res) => {
     dueDate: {$lte: upcomingCutoffIST}, // Include upcoming
   }).populate('customerId', 'name phone isDeleted').lean();
   
+  // Get interest settings for interest computation on bills
+  const BusinessSettings = require('../models/BusinessSettings');
+  const interestService = require('../services/interest.service');
+  const settings = await BusinessSettings.getOrCreate(userId);
+  // Note: nowIST already defined above at line 98
+
   for (const bill of bills) {
     if (!bill.customerId || bill.customerId.isDeleted) continue;
     
@@ -135,7 +141,31 @@ const getDailyChaseList = asyncHandler(async (req, res) => {
       };
     }
     
-    // Add bill item
+    // Compute interest summary for this bill (if interest enabled)
+    let interestSummary = null;
+    if (settings.interestEnabled) {
+      const interestResult = interestService.computeBillInterest(bill, settings, nowIST);
+      if (interestResult.interestAccrued > 0) {
+        interestSummary = {
+          interestAccrued: interestResult.interestAccrued,
+          interestPerDay: interestResult.interestPerDay,
+          totalWithInterest: interestResult.totalWithInterest,
+          startsAt: interestResult.startsAt,
+          daysAccruing: interestResult.daysAccruing,
+        };
+      } else {
+        // Include zero interest summary if policy enabled but no interest yet
+        interestSummary = {
+          interestAccrued: 0,
+          interestPerDay: interestResult.interestPerDay,
+          totalWithInterest: interestResult.totalWithInterest,
+          startsAt: interestResult.startsAt,
+          daysAccruing: 0,
+        };
+      }
+    }
+    
+    // Add bill item with interest summary
     chaseByCustomer[customerId].items.push({
       kind: 'BILL',
       id: bill._id,
@@ -145,6 +175,7 @@ const getDailyChaseList = asyncHandler(async (req, res) => {
       bucket,
       title: `Bill #${bill.billNo}`,
       amountDue,
+      interestSummary, // Add interest summary for WhatsApp messages
     });
   }
   
@@ -415,6 +446,66 @@ const getDailyChaseList = asyncHandler(async (req, res) => {
   }
   
   // ═══════════════════════════════════════════════════════════════════════════
+  // STEP 7.5: Compute interest totals (if interest policy enabled)
+  // ═══════════════════════════════════════════════════════════════════════════
+  
+  // Note: settings already loaded above for bill items
+  
+  let interestTotals = null;
+  if (settings.interestEnabled) {
+    // Compute interest for overdue bills only
+    const overdueBills = await Bill.find({
+      userId,
+      isDeleted: {$ne: true},
+      status: {$in: ['unpaid', 'partial']},
+      dueDate: {$exists: true, $ne: null, $lt: nowIST},
+    }).lean();
+    
+    let overdueInterestAccrued = 0;
+    let overdueInterestPerDay = 0;
+    let todayInterestAccrued = 0;
+    let todayInterestPerDay = 0;
+    
+    for (const bill of overdueBills) {
+      const result = interestService.computeBillInterest(bill, settings, nowIST);
+      if (result.interestAccrued > 0) {
+        const dueDate = new Date(bill.dueDate);
+        const bucket = bucketDateIST(dueDate);
+        
+        if (bucket === 'OVERDUE') {
+          overdueInterestAccrued += result.interestAccrued;
+          overdueInterestPerDay += result.interestPerDay;
+        } else if (bucket === 'TODAY') {
+          todayInterestAccrued += result.interestAccrued;
+          todayInterestPerDay += result.interestPerDay;
+        }
+      }
+    }
+    
+    interestTotals = {
+      overdue: {
+        interestAccrued: Math.round(overdueInterestAccrued),
+        interestPerDay: Math.round(overdueInterestPerDay * 100) / 100,
+      },
+      today: {
+        interestAccrued: Math.round(todayInterestAccrued),
+        interestPerDay: Math.round(todayInterestPerDay * 100) / 100,
+      },
+      policy: {
+        enabled: true,
+        ratePctPerMonth: settings.interestRatePctPerMonth,
+        graceDays: settings.interestGraceDays,
+      },
+    };
+  } else {
+    interestTotals = {
+      overdue: {interestAccrued: 0, interestPerDay: 0},
+      today: {interestAccrued: 0, interestPerDay: 0},
+      policy: {enabled: false},
+    };
+  }
+  
+  // ═══════════════════════════════════════════════════════════════════════════
   // STEP 8: Return response (v2 contract with backward compatibility)
   // ═══════════════════════════════════════════════════════════════════════════
   
@@ -424,6 +515,7 @@ const getDailyChaseList = asyncHandler(async (req, res) => {
     // New contract (v2)
     chaseCustomers: limitedCustomers,
     counters,
+    interestTotals, // Add interest totals
     
     // Backward compatibility (DEPRECATED)
     chaseItems,
