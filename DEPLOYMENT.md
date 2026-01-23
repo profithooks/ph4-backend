@@ -88,7 +88,11 @@ location / {
 
 2. **HTTPS**: Ensure your reverse proxy terminates SSL/TLS and forwards requests to the backend over HTTP (or internal HTTPS).
 
-3. **CORS**: Update `CORS_ORIGINS` to include your production frontend domain if needed.
+3. **CORS**: Update `CORS_ORIGINS` to include your production frontend domain:
+   ```bash
+   CORS_ORIGINS=https://www.profithooks.com,http://localhost:19000,http://localhost:8081,http://localhost:3000
+   ```
+   This allows the web frontend to fetch bill JSON from the backend.
 
 ### Testing Share Links
 

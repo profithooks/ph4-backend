@@ -10,6 +10,7 @@ const getCorsOrigins = () => {
     return process.env.CORS_ORIGINS.split(',').map(origin => origin.trim());
   }
   // Default dev origins (includes Vite dev server on 5173)
+  // Production: Add https://www.profithooks.com via CORS_ORIGINS env var
   return ['http://localhost:19000', 'http://localhost:8081', 'http://localhost:3000', 'http://localhost:5173'];
 };
 

@@ -14,20 +14,45 @@ const {publicAppBaseUrl, nodeEnv} = require('../config/env');
  * - In dev: defaults to http://localhost:5173
  */
 const generatePublicUrl = (token) => {
-  // Validate production requirement
-  if (nodeEnv === 'production' && !publicAppBaseUrl) {
+  try {
+    // Validate production requirement
+    if (nodeEnv === 'production' && !publicAppBaseUrl) {
+      throw new AppError(
+        'PUBLIC_APP_BASE_URL must be set in production environment',
+        500,
+        'MISSING_PUBLIC_APP_BASE_URL'
+      );
+    }
+    
+    // Ensure base URL doesn't end with trailing slash
+    const base = (publicAppBaseUrl || 'http://localhost:5173').replace(/\/$/, '');
+    
+    // Validate token
+    if (!token || typeof token !== 'string') {
+      throw new AppError('Invalid token provided', 500, 'INVALID_TOKEN');
+    }
+    
+    // Return URL pointing to web frontend viewer route
+    return `${base}/b/${token}`;
+  } catch (error) {
+    // Re-throw AppError as-is
+    if (error instanceof AppError) {
+      throw error;
+    }
+    // Wrap unexpected errors
+    logger.error('[BillShare] generatePublicUrl error', {
+      error: error.message,
+      stack: error.stack,
+      token: token ? token.substring(0, 8) + '...' : 'null',
+      nodeEnv,
+      hasPublicAppBaseUrl: !!publicAppBaseUrl,
+    });
     throw new AppError(
-      'PUBLIC_APP_BASE_URL must be set in production environment',
+      'Failed to generate share URL',
       500,
-      'MISSING_PUBLIC_APP_BASE_URL'
+      'URL_GENERATION_ERROR'
     );
   }
-  
-  // Ensure base URL doesn't end with trailing slash
-  const base = (publicAppBaseUrl || 'http://localhost:5173').replace(/\/$/, '');
-  
-  // Return URL pointing to web frontend viewer route
-  return `${base}/b/${token}`;
 };
 
 /**
@@ -38,6 +63,14 @@ exports.createBillShareLink = async (req, res, next) => {
   try {
     const userId = req.user._id;
     const billId = req.params.id;
+
+    // Validate inputs
+    if (!userId) {
+      throw new AppError('User not authenticated', 401, 'UNAUTHORIZED');
+    }
+    if (!billId) {
+      throw new AppError('Bill ID is required', 400, 'MISSING_BILL_ID');
+    }
 
     // Load bill and verify ownership
     const bill = await Bill.findOne({_id: billId, userId});
@@ -55,17 +88,32 @@ exports.createBillShareLink = async (req, res, next) => {
     if (shareLink) {
       // Return existing link
       const url = generatePublicUrl(shareLink.token);
-      return res.status(200).json({
-        success: true,
-        data: {
-          url,
-          token: shareLink.token,
-        },
+      return res.success({
+        url,
+        token: shareLink.token,
       });
     }
 
     // Create new share link
-    const token = crypto.randomBytes(24).toString('hex'); // 48 chars
+    let token;
+    let attempts = 0;
+    const maxAttempts = 5;
+    
+    // Retry token generation if there's a collision (unlikely but possible)
+    while (attempts < maxAttempts) {
+      token = crypto.randomBytes(24).toString('hex'); // 48 chars
+      
+      // Check if token already exists (extremely unlikely but handle it)
+      const existing = await BillShareLink.findOne({token});
+      if (!existing) {
+        break;
+      }
+      attempts++;
+    }
+
+    if (attempts >= maxAttempts) {
+      throw new AppError('Failed to generate unique token', 500, 'TOKEN_GENERATION_FAILED');
+    }
 
     shareLink = await BillShareLink.create({
       userId,
@@ -81,25 +129,35 @@ exports.createBillShareLink = async (req, res, next) => {
       userId: userId.toString(),
       billId: billId.toString(),
       token: shareLink.token.substring(0, 8) + '...',
+      url,
     });
 
-    res.status(201).json({
-      success: true,
-      data: {
-        url,
-        token: shareLink.token,
-      },
-    });
+    res.success({
+      url,
+      token: shareLink.token,
+    }, null, 201);
   } catch (error) {
     if (error instanceof AppError) {
       return next(error);
     }
+    
+    // Log full error details for debugging
     logger.error('[BillShare] Create link error', {
       requestId: req.requestId,
       error: error.message,
       stack: error.stack,
+      userId: req.user?._id?.toString(),
+      billId: req.params?.id,
+      nodeEnv,
+      hasPublicAppBaseUrl: !!publicAppBaseUrl,
     });
-    next(error);
+    
+    // Return generic error to client
+    next(new AppError(
+      'Failed to create share link. Please try again.',
+      500,
+      'SHARE_LINK_CREATION_FAILED'
+    ));
   }
 };
 
@@ -121,8 +179,7 @@ exports.revokeBillShareLink = async (req, res, next) => {
 
     if (!shareLink) {
       // Already revoked or never existed - return success (idempotent)
-      return res.status(200).json({
-        success: true,
+      return res.success({
         message: 'Share link already revoked or does not exist',
       });
     }
@@ -139,8 +196,7 @@ exports.revokeBillShareLink = async (req, res, next) => {
       token: shareLink.token.substring(0, 8) + '...',
     });
 
-    res.status(200).json({
-      success: true,
+    res.success({
       message: 'Share link revoked successfully',
     });
   } catch (error) {
