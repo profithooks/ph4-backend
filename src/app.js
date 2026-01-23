@@ -123,11 +123,11 @@ app.use('/api/v1/diagnostics', diagnosticsRoutes);
 app.use('/api/v1/notifications', notificationRoutes);
 app.use('/api/v1/audit', auditRoutes);
 app.use('/api/v1/today', todayRoutes);
+app.use('/api/v1/ops', opsRoutes); // Mount ops routes BEFORE /api/v1 to avoid conflicts
 app.use('/api/v1', promiseRoutes);
 app.use('/api/v1/insights', insightsRoutes);
 app.use('/api/v1/security', securityRoutes);
 app.use('/api/v1', pilotModeRoutes);
-app.use('/api/v1/ops', opsRoutes);
 app.use('/api/v1/support', supportRoutes);
 app.use('/api/v1/dev', specComplianceRoutes);
 app.use('/api/v1/backup', backupRoutes);
