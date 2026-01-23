@@ -31,12 +31,22 @@ const notificationSchema = new mongoose.Schema(
     kind: {
       type: String,
       enum: [
+        // New kinds (per NOTIFICATIONS_SPEC.md)
+        'OVERDUE_ALERT',
+        'DUE_TODAY',
+        'PROMISE_DUE_TODAY',
+        'PROMISE_BROKEN',
+        'FOLLOWUP_DUE',
+        'PAYMENT_RECEIVED',
+        'DEVICE_APPROVAL_REQUIRED',
+        'DAILY_SUMMARY',
+        'CREDIT_LIMIT_WARN',
+        // Legacy kinds (for backward compatibility)
         'FOLLOWUP',           // Follow-up reminder
         'PROMISE_REMINDER',   // Promise due reminder
         'OVERDUE',            // Overdue payment
         'SYSTEM',             // System notifications
         'BILL_CREATED',       // Bill created
-        'PAYMENT_RECEIVED',   // Payment received
       ],
       required: true,
       index: true,

@@ -28,6 +28,7 @@ const connectDB = require('./config/db');
 const mongoose = require('mongoose');
 const {startMessageDeliveryCron} = require('./cron/messageDelivery.cron');
 const {startNotificationDeliveryCron} = require('./cron/notificationDelivery.cron');
+const {startNotificationGenerationCron} = require('./cron/notificationGeneration.cron');
 const {scheduleIntegrityChecks} = require('./cron/integrityCheck.cron');
 const {startRecoveryTaskCron} = require('./cron/recoveryTaskProcessing.cron');
 
@@ -44,6 +45,7 @@ const server = app.listen(PORT, () => {
   // Start cron jobs after server is ready
   startMessageDeliveryCron();
   startNotificationDeliveryCron();
+  startNotificationGenerationCron(); // Notification generation (15min + daily)
   scheduleIntegrityChecks();
   
   // MULTI-INSTANCE SAFE: Recovery cron uses distributed lock (CronLock model)

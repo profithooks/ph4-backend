@@ -16,6 +16,7 @@ const {
   getRecoverySettings,
   enableRecovery,
   disableRecovery,
+  registerPushToken,
 } = require('../controllers/security.controller');
 const {
   initBusinessReset,
@@ -47,6 +48,14 @@ router.post('/devices/:id/approve', approveDeviceEndpoint);
  * @access  Private (Owner)
  */
 router.post('/devices/:id/block', blockDeviceEndpoint);
+
+/**
+ * @route   POST /api/v1/security/devices/push-token
+ * @desc    Register/update FCM push token for current device
+ * @body    { fcmToken: string }
+ * @access  Private
+ */
+router.post('/devices/push-token', registerPushToken);
 
 /**
  * @route   GET /api/v1/security/recovery

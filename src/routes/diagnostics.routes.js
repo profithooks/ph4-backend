@@ -11,6 +11,7 @@ const {
   getReliabilityEvents,
   getReliabilityEventByRequestId,
   getReliabilityStats,
+  notificationDryRun,
 } = require('../controllers/diagnostics.controller');
 const {
   getLatestIntegrityReport,
@@ -65,5 +66,6 @@ router.get('/integrity/history', requireOwner, getIntegrityReportHistory);
  * @access  Owner
  */
 router.post('/integrity/run', requireOwner, runIntegrityCheck);
+
 
 module.exports = router;

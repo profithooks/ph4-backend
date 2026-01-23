@@ -775,6 +775,22 @@ exports.addBillPayment = async (req, res, next) => {
       `[Bill] Payment ₹${actualPaymentAmount} recorded, credit released atomically, status=${bill.status}`,
     );
 
+    // Generate PAYMENT_RECEIVED notification (non-blocking, must not fail payment)
+    if (actualPaymentAmount > 0) {
+      const {generatePaymentReceivedNotification} = require('../services/notifications/generators/paymentReceived');
+      generatePaymentReceivedNotification({
+        billId: bill._id,
+        userId,
+      }).catch(error => {
+        // Swallow errors - payment must succeed even if notification fails
+        logger.error('[Bill] Failed to generate payment notification', {
+          error: error.message,
+          billId: bill._id,
+          userId,
+        });
+      });
+    }
+
     // Populate customer for response
     await bill.populate('customerId', 'name phone');
 

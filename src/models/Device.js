@@ -62,6 +62,16 @@ const deviceSchema = new mongoose.Schema(
     },
     blockedAt: Date,
     blockedReason: String,
+    // Firebase Cloud Messaging token (for push notifications)
+    fcmToken: {
+      type: String,
+      default: null,
+      index: true,
+    },
+    fcmTokenUpdatedAt: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,

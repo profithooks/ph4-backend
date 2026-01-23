@@ -6,11 +6,15 @@
  */
 const asyncHandler = require('express-async-handler');
 const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const Device = require('../models/Device');
 const AuditEvent = require('../models/AuditEvent');
-const {getDevices, approveDevice, blockDevice} = require('../services/device.service');
+const {getDevices, approveDevice, blockDevice, getOrCreateDevice} = require('../services/device.service');
 const {getUserRole, isOwner} = require('../middleware/permission.middleware');
+const {jwtSecret} = require('../config/env');
 const logger = require('../utils/logger');
+const AppError = require('../utils/AppError');
 
 /**
  * Get devices
@@ -213,6 +217,109 @@ const disableRecovery = asyncHandler(async (req, res) => {
   }
 });
 
+/**
+ * Register/update FCM push token for current device
+ * POST /api/v1/security/devices/push-token
+ */
+const registerPushToken = asyncHandler(async (req, res) => {
+  const userId = req.user._id;
+  const businessId = req.user.businessId || userId;
+  const {fcmToken} = req.body;
+  const requestId = req.requestId;
+
+  // Validate fcmToken
+  if (!fcmToken || typeof fcmToken !== 'string') {
+    throw new AppError('fcmToken is required and must be a string', 400, 'INVALID_FCM_TOKEN');
+  }
+
+  // Trim and validate
+  const trimmedToken = fcmToken.trim();
+  
+  if (trimmedToken.length === 0) {
+    throw new AppError('fcmToken cannot be empty', 400, 'INVALID_FCM_TOKEN');
+  }
+
+  if (trimmedToken.length > 4096) {
+    throw new AppError('fcmToken exceeds maximum length of 4096 characters', 400, 'INVALID_FCM_TOKEN');
+  }
+
+  // Reject obvious placeholders
+  const invalidValues = ['null', 'undefined', 'none', 'test', 'placeholder'];
+  if (invalidValues.includes(trimmedToken.toLowerCase())) {
+    throw new AppError('fcmToken appears to be a placeholder value', 400, 'INVALID_FCM_TOKEN');
+  }
+
+  // Determine deviceId: prefer JWT claim, else header
+  let deviceId = null;
+
+  // Try JWT claim first
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    try {
+      const token = authHeader.split(' ')[1];
+      const decoded = jwt.verify(token, jwtSecret);
+      if (decoded.deviceId) {
+        deviceId = decoded.deviceId;
+      }
+    } catch (error) {
+      // JWT decode failed, continue to header check
+      logger.debug('[Security] Failed to decode JWT for deviceId', {requestId, error: error.message});
+    }
+  }
+
+  // Fallback to header
+  if (!deviceId) {
+    deviceId = req.headers['x-device-id'] || req.headers['X-DEVICE-ID'];
+  }
+
+  // If still no deviceId, return 400
+  if (!deviceId) {
+    throw new AppError('deviceId is required. Provide it in JWT claim or x-device-id header', 400, 'DEVICE_ID_REQUIRED');
+  }
+
+  // Find or create device
+  let device = await Device.findOne({userId, deviceId});
+
+  if (!device) {
+    // Use existing getOrCreateDevice service
+    device = await getOrCreateDevice({
+      userId,
+      businessId,
+      deviceId,
+      deviceMeta: {
+        // Minimal metadata since we're just registering token
+        deviceName: 'Unknown Device',
+        platform: 'unknown',
+      },
+    });
+  }
+
+  // Check device status - do not allow token registration for BLOCKED devices
+  if (device.status === 'BLOCKED') {
+    throw new AppError('Device is blocked and cannot register push token', 403, 'DEVICE_NOT_TRUSTED');
+  }
+
+  // Update FCM token
+  device.fcmToken = trimmedToken;
+  device.fcmTokenUpdatedAt = new Date();
+  await device.save();
+
+  logger.info('[Security] FCM token registered/updated', {
+    requestId,
+    userId,
+    deviceId: device.deviceId,
+    deviceStatus: device.status,
+    tokenLength: trimmedToken.length,
+    // Do NOT log full token for security
+  });
+
+  res.success({
+    ok: true,
+    deviceId: device.deviceId,
+    tokenUpdatedAt: device.fcmTokenUpdatedAt,
+  });
+});
+
 module.exports = {
   getUserDevices,
   approveDeviceEndpoint,
@@ -220,4 +327,5 @@ module.exports = {
   getRecoverySettings,
   enableRecovery,
   disableRecovery,
+  registerPushToken,
 };

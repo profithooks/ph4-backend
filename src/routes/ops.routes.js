@@ -16,6 +16,7 @@ const router = express.Router();
 const {
   activateProManually,
   getUserEntitlement,
+  sendTestPush,
 } = require('../controllers/ops.controller');
 
 /**
@@ -85,5 +86,20 @@ router.post('/users/:id/activate-pro', activateProManually);
  *   -H "X-Admin-Secret: YOUR_SECRET"
  */
 router.get('/users/:id/entitlement', getUserEntitlement);
+
+/**
+ * Send test push notification
+ * 
+ * @route   POST /ops/users/:id/test-push
+ * @access  Admin (X-Admin-Secret required in production)
+ * @body    { kind?: string, title?: string, body?: string }
+ * @desc    Send a test push notification to user's trusted devices
+ * 
+ * Example:
+ * curl -X POST http://localhost:5055/api/v1/ops/users/USER_ID/test-push \
+ *   -H "Content-Type: application/json" \
+ *   -d '{"kind": "DAILY_SUMMARY", "title": "Test", "body": "Test message"}'
+ */
+router.post('/users/:id/test-push', sendTestPush);
 
 module.exports = router;
