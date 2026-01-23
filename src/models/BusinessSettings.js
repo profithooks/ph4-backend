@@ -92,11 +92,11 @@ const businessSettingsSchema = new mongoose.Schema(
     // Step 9: Recovery & Follow-up Engine Settings
     recoveryEnabled: {
       type: Boolean,
-      default: false,
+      default: true, // Enabled by default for new users
     },
     autoFollowupEnabled: {
       type: Boolean,
-      default: false,
+      default: true, // Enabled by default for new users
     },
     ledgerEnabled: {
       type: Boolean,
@@ -106,6 +106,18 @@ const businessSettingsSchema = new mongoose.Schema(
       type: String,
       enum: ['DAILY', 'WEEKLY', 'CUSTOM'],
       default: 'DAILY',
+    },
+    followupDaysAfterBillCreate: {
+      type: Number,
+      default: 1, // Default: 1 day after bill creation
+      min: 0,
+      max: 365,
+    },
+    followupDaysAfterReminder: {
+      type: Number,
+      default: 1, // Default: 1 day after given/taken reminder
+      min: 0,
+      max: 365,
     },
     escalationDays: {
       type: Number,

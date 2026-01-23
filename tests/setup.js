@@ -71,7 +71,14 @@ const ensureTestUser = async () => {
     let user = await User.findOne({ email: TEST_EMAIL });
     
     if (user) {
-      console.log(`[Test Setup] Test user already exists: ${TEST_EMAIL}`);
+      // Update existing user to pro if not already
+      if (user.planStatus !== 'pro') {
+        user.planStatus = 'pro';
+        await user.save();
+        console.log(`[Test Setup] Updated existing test user to pro: ${TEST_EMAIL}`);
+      } else {
+        console.log(`[Test Setup] Test user already exists: ${TEST_EMAIL}`);
+      }
       return user;
     }
 
@@ -81,6 +88,7 @@ const ensureTestUser = async () => {
       email: TEST_EMAIL,
       password: TEST_PASSWORD,
       phone: '+919890980947',
+      planStatus: 'pro', // Set to pro for testing Pro features
     });
 
     console.log(`[Test Setup] Test user created: ${TEST_EMAIL}`);

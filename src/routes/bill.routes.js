@@ -19,6 +19,7 @@ const {
   deleteBill,
 } = require('../controllers/bill.controller');
 const {requireOwner} = require('../middleware/permission.middleware');
+const billShareRoutes = require('./billShare.routes');
 
 // All bill routes require authentication
 router.use(protect);
@@ -44,5 +45,8 @@ router.patch('/:id/cancel', validateObjectId('id'), requirePro, validate(cancelB
 
 // Bill deletion - Pro/Trial only + owner permission
 router.delete('/:id', validateObjectId('id'), requireOwner, requirePro, deleteBill);
+
+// Bill share link routes (nested under /api/bills)
+router.use('/', billShareRoutes);
 
 module.exports = router;

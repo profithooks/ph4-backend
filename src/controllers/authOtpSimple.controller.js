@@ -203,6 +203,79 @@ exports.verifyOtp = asyncHandler(async (req, res) => {
 });
 
 /**
+ * @route   POST /api/v1/auth/mobile/login
+ * @desc    Login/Signup with mobile only (skip OTP for now)
+ * @access  Public
+ */
+exports.mobileLogin = asyncHandler(async (req, res) => {
+  const {mobile, countryCode = '+91', device} = req.body;
+  
+  // Validate
+  if (!mobile) {
+    throw new AppError('Mobile number is required', 400, 'MISSING_MOBILE');
+  }
+  
+  const normalizedMobile = normalizeMobile(mobile);
+  
+  // Validate mobile format (8-13 digits)
+  if (!/^\d{8,13}$/.test(normalizedMobile)) {
+    throw new AppError('Invalid mobile number format', 400, 'INVALID_MOBILE');
+  }
+  
+  // Find or create user
+  const fullMobile = `${countryCode}${normalizedMobile}`;
+  let user = await User.findOne({mobile: normalizedMobile});
+  
+  if (!user) {
+    // Create new user (skip OTP verification for now)
+    user = await User.create({
+      mobile: normalizedMobile,
+      countryCode,
+      phoneE164: fullMobile,
+      phoneVerified: true, // Mark as verified since we're skipping OTP
+    });
+    
+    logger.info('[MobileLogin] New user created', {
+      userId: user._id,
+      mobile: normalizedMobile,
+    });
+  } else {
+    // Existing user - mark phone as verified
+    if (!user.phoneVerified) {
+      user.phoneVerified = true;
+      await user.save();
+    }
+  }
+  
+  // Generate tokens
+  const accessToken = generateToken(user._id);
+  const refreshToken = generateRefreshToken(user._id);
+  
+  // Check if businessName is set
+  const needsBusinessName = !user.businessName || user.businessName.trim() === '';
+  
+  logger.info('[MobileLogin] User logged in', {
+    userId: user._id,
+    mobile: normalizedMobile,
+    needsBusinessName,
+  });
+  
+  res.status(200).json({
+    success: true,
+    accessToken,
+    refreshToken,
+    user: {
+      id: user._id,
+      mobile: user.mobile,
+      countryCode: user.countryCode,
+      businessName: user.businessName,
+      role: user.role,
+    },
+    needsBusinessName,
+  });
+});
+
+/**
  * @route   PATCH /api/v1/auth/me/business
  * @desc    Set business name (after OTP auth)
  * @access  Private

@@ -42,6 +42,7 @@ const opsRoutes = require('./routes/ops.routes');
 const supportRoutes = require('./routes/support.routes');
 const specComplianceRoutes = require('./routes/specCompliance.routes');
 const backupRoutes = require('./routes/backup.routes');
+const publicBillRoutes = require('./routes/publicBill.routes');
 
 // Step 23: Go-Live & Rollout Control middleware
 const {checkGlobalKillSwitch, checkFeatureKillSwitches} = require('./middleware/killSwitch.middleware');
@@ -50,8 +51,12 @@ const {checkFeatureFreeze} = require('./middleware/featureFreeze.middleware');
 const app = express();
 
 // Security: Trust proxy (if behind reverse proxy)
+// In production, this should be enabled to correctly detect protocol/host
 if (trustProxy) {
   app.set('trust proxy', 1);
+} else if (process.env.NODE_ENV === 'production') {
+  // Warn if trust proxy is not enabled in production (may cause incorrect protocol detection)
+  console.warn('[WARN] TRUST_PROXY is not enabled in production. This may cause incorrect protocol/host detection behind reverse proxy.');
 }
 
 // Security: Disable x-powered-by header
@@ -126,6 +131,9 @@ app.use('/api/v1/ops', opsRoutes);
 app.use('/api/v1/support', supportRoutes);
 app.use('/api/v1/dev', specComplianceRoutes);
 app.use('/api/v1/backup', backupRoutes);
+
+// Public routes (outside /api prefix, no auth required)
+app.use('/public', publicBillRoutes);
 
 // Health check (legacy, kept for backward compatibility)
 app.get('/health', (req, res) => {

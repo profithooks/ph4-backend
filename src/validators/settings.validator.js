@@ -28,9 +28,18 @@ const updateBusinessSettingsSchema = {
     recoveryPinHash: Joi.string(),
     // Step 6: Auto followup settings
     autoFollowupEnabled: Joi.boolean(),
+    followupCadence: Joi.string().valid('DAILY', 'WEEKLY', 'CUSTOM'),
+    followupDaysAfterBillCreate: Joi.number().integer().min(0).max(365),
+    followupDaysAfterReminder: Joi.number().integer().min(0).max(365),
+    escalationDays: Joi.number().integer().min(0),
+    gracePeriodDays: Joi.number().integer().min(0),
     // Channel settings
     whatsappEnabled: Joi.boolean(),
     smsEnabled: Joi.boolean(),
+    channelsEnabled: Joi.object({
+      whatsapp: Joi.boolean(),
+      sms: Joi.boolean(),
+    }),
     // Ledger settings
     ledgerEnabled: Joi.boolean(),
   }).min(1),

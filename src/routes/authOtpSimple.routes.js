@@ -7,6 +7,7 @@ const {protect} = require('../middleware/auth.middleware');
 const {
   requestOtp,
   verifyOtp,
+  mobileLogin,
   setBusinessName,
   refreshToken,
 } = require('../controllers/authOtpSimple.controller');
@@ -16,6 +17,7 @@ const router = express.Router();
 // Public routes
 router.post('/otp/request', requestOtp);
 router.post('/otp/verify', verifyOtp);
+router.post('/mobile/login', mobileLogin); // Skip OTP for now
 router.post('/refresh', refreshToken);
 
 // Protected routes

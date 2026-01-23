@@ -9,8 +9,8 @@ const getCorsOrigins = () => {
   if (process.env.CORS_ORIGINS) {
     return process.env.CORS_ORIGINS.split(',').map(origin => origin.trim());
   }
-  // Default dev origins
-  return ['http://localhost:19000', 'http://localhost:8081', 'http://localhost:3000'];
+  // Default dev origins (includes Vite dev server on 5173)
+  return ['http://localhost:19000', 'http://localhost:8081', 'http://localhost:3000', 'http://localhost:5173'];
 };
 
 /**

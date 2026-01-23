@@ -30,6 +30,27 @@ const validateJwtSecret = () => {
   return secret;
 };
 
+/**
+ * Get public app base URL (web frontend domain)
+ * Used for share link URLs that point to web viewer
+ */
+const getPublicAppBaseUrl = () => {
+  const nodeEnv = process.env.NODE_ENV || 'development';
+  
+  // If explicitly set, use it
+  if (process.env.PUBLIC_APP_BASE_URL) {
+    return process.env.PUBLIC_APP_BASE_URL;
+  }
+  
+  // Dev default: web dev server (Vite default port 5173)
+  if (nodeEnv !== 'production') {
+    return 'http://localhost:5173';
+  }
+  
+  // Production: must be set
+  return null; // Will throw error if used in production
+};
+
 module.exports = {
   nodeEnv: process.env.NODE_ENV || 'development',
   port: process.env.PORT || 5000,
@@ -38,4 +59,6 @@ module.exports = {
   jwtExpire: process.env.JWT_EXPIRE || '7d', // Changed from 30d to 7d for security
   razorpayKeyId: process.env.RAZORPAY_KEY_ID || '',
   razorpayKeySecret: process.env.RAZORPAY_KEY_SECRET || '',
+  publicBillBaseUrl: process.env.PUBLIC_BILL_BASE_URL || null, // Deprecated: kept for backward compatibility
+  publicAppBaseUrl: getPublicAppBaseUrl(), // Web frontend base URL for share links
 };

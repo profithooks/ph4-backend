@@ -49,6 +49,8 @@ exports.updateSettings = async (req, res, next) => {
       autoFollowupEnabled,
       ledgerEnabled,
       followupCadence,
+      followupDaysAfterBillCreate,
+      followupDaysAfterReminder,
       escalationDays,
       gracePeriodDays,
       channelsEnabled,
@@ -119,6 +121,32 @@ exports.updateSettings = async (req, res, next) => {
     }
     if (followupCadence !== undefined) {
       updateFields.followupCadence = followupCadence;
+    }
+    if (followupDaysAfterBillCreate !== undefined) {
+      // Validate range
+      if (followupDaysAfterBillCreate < 0 || followupDaysAfterBillCreate > 365) {
+        return next(
+          new AppError(
+            'followupDaysAfterBillCreate must be between 0 and 365',
+            400,
+            'VALIDATION_ERROR',
+          ),
+        );
+      }
+      updateFields.followupDaysAfterBillCreate = followupDaysAfterBillCreate;
+    }
+    if (followupDaysAfterReminder !== undefined) {
+      // Validate range
+      if (followupDaysAfterReminder < 0 || followupDaysAfterReminder > 365) {
+        return next(
+          new AppError(
+            'followupDaysAfterReminder must be between 0 and 365',
+            400,
+            'VALIDATION_ERROR',
+          ),
+        );
+      }
+      updateFields.followupDaysAfterReminder = followupDaysAfterReminder;
     }
     if (escalationDays !== undefined) {
       updateFields.escalationDays = escalationDays;
