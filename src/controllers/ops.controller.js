@@ -282,9 +282,12 @@ const sendTestPush = async (req, res) => {
         })),
         attemptsCreated: result.attempts.length,
         workerStats: {
-          processed: workerStats.processed,
-          succeeded: workerStats.succeeded,
-          failed: workerStats.failed,
+          processed: workerStats.processed || 0,
+          sent: workerStats.sent || 0,
+          retrying: workerStats.retrying || 0,
+          failed: workerStats.failed || 0,
+          // Backward compatibility
+          succeeded: workerStats.sent || 0,
         },
         message: 'Test notification created. Check device within a few seconds.',
       },

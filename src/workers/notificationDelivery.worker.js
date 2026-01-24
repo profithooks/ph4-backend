@@ -221,7 +221,7 @@ async function runWorker() {
     
     if (attempts.length === 0) {
       logger.debug('[NotificationWorker] No attempts to process');
-      return {processed: 0, sent: 0, retrying: 0, failed: 0};
+      return {processed: 0, sent: 0, retrying: 0, failed: 0, succeeded: 0};
     }
     
     logger.info('[NotificationWorker] Processing batch', {
@@ -247,6 +247,9 @@ async function runWorker() {
         results.failed++;
       }
     }
+    
+    // Add succeeded alias for backward compatibility
+    results.succeeded = results.sent;
     
     logger.info('[NotificationWorker] Batch complete', results);
     

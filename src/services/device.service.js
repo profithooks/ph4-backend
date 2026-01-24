@@ -21,8 +21,17 @@ const getOrCreateDevice = async (params) => {
     let device = await Device.findOne({userId, deviceId});
     
     if (!device) {
-      // Create new device with PENDING status
-      device = await Device.create({
+      // Auto-trust first device for the business
+      const trustedDeviceCount = await Device.countDocuments({
+        businessId,
+        status: 'TRUSTED',
+      });
+      
+      const isFirstDevice = trustedDeviceCount === 0;
+      const initialStatus = isFirstDevice ? 'TRUSTED' : 'PENDING';
+      
+      // Create new device
+      const deviceData = {
         userId,
         businessId,
         deviceId,
@@ -31,29 +40,52 @@ const getOrCreateDevice = async (params) => {
         osVersion: deviceMeta.osVersion,
         appVersion: deviceMeta.appVersion,
         modelName: deviceMeta.modelName,
-        status: 'PENDING',
+        status: initialStatus,
         firstSeenAt: new Date(),
         lastSeenAt: new Date(),
-      });
+      };
+      
+      // If auto-trusting, set approval fields
+      if (isFirstDevice) {
+        deviceData.approvedBy = userId;
+        deviceData.approvedAt = new Date();
+      }
+      
+      device = await Device.create(deviceData);
       
       // Create audit event
+      const auditAction = isFirstDevice ? 'DEVICE_APPROVED' : 'DEVICE_BOUND';
       await AuditEvent.create({
         at: new Date(),
         businessId,
         actorUserId: userId,
-        actorRole: 'USER',
-        action: 'DEVICE_BOUND',
+        actorRole: isFirstDevice ? 'SYSTEM' : 'USER',
+        action: auditAction,
         entityType: 'DEVICE',
         entityId: device._id,
         metadata: {
           deviceId,
           deviceName: device.deviceName,
           platform: device.platform,
-          status: 'PENDING',
+          status: initialStatus,
+          autoTrusted: isFirstDevice,
         },
       }).catch(err => logger.warn('[Device] Audit event creation failed', err));
       
-      logger.info('[Device] New device created (PENDING)', {userId, deviceId, deviceName: device.deviceName});
+      if (isFirstDevice) {
+        logger.info('[Device] First device auto-trusted', {
+          userId,
+          businessId,
+          deviceId,
+          deviceName: device.deviceName,
+        });
+      } else {
+        logger.info('[Device] New device created (PENDING)', {
+          userId,
+          deviceId,
+          deviceName: device.deviceName,
+        });
+      }
     } else {
       // Update last seen
       device.lastSeenAt = new Date();
