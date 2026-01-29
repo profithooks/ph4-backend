@@ -42,6 +42,7 @@ const pilotModeRoutes = require('./routes/pilotMode.routes');
 const opsRoutes = require('./routes/ops.routes');
 const supportRoutes = require('./routes/support.routes');
 const specComplianceRoutes = require('./routes/specCompliance.routes');
+const devPushRoutes = require('./routes/devPush.routes');
 const backupRoutes = require('./routes/backup.routes');
 const publicBillRoutes = require('./routes/publicBill.routes');
 const webhookRoutes = require('./routes/webhook.routes');
@@ -136,6 +137,7 @@ app.use('/api/v1/security', securityRoutes);
 app.use('/api/v1', pilotModeRoutes);
 app.use('/api/v1/support', supportRoutes);
 app.use('/api/v1/dev', specComplianceRoutes);
+app.use('/api/v1/dev', devPushRoutes); // Dev push notification testing
 app.use('/api/v1/backup', backupRoutes);
 
 // Public routes (outside /api prefix, no auth required)
