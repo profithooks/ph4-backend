@@ -4,6 +4,7 @@ const {createRateLimiter} = require('../middleware/rateLimit.middleware');
 const {
   getPublicBill,
   getPublicBillJson,
+  createPublicBillPayment,
 } = require('../controllers/publicBill.controller');
 
 // Strict rate limit for public endpoints (60 requests per minute per IP)
@@ -25,5 +26,8 @@ router.get('/b/:token.json', getPublicBillJson);
 
 // Public bill viewer (HTML)
 router.get('/b/:token', getPublicBill);
+
+// Create payment order for public bill
+router.post('/b/:token/pay/create', createPublicBillPayment);
 
 module.exports = router;

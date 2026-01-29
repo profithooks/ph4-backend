@@ -41,20 +41,75 @@ const getTodaySummary = asyncHandler(async (req, res) => {
   const todayEndIST = getEndOfDayIST(targetDate);
   const nowIST = getNowIST();
   
+  // Reliability tracking
+  const reliabilityMeta = {
+    ok: true,
+    queriesSucceeded: [],
+    queriesFailed: [],
+    queryDurations: {},
+  };
+  
+  // Helper to execute query with reliability tracking
+  const executeQuery = async (name, queryFn, fallbackValue) => {
+    const startTime = Date.now();
+    try {
+      logger.info(`[Today] Starting query: ${name}`, {userId, requestId: req.requestId});
+      const result = await queryFn();
+      const durationMs = Date.now() - startTime;
+      reliabilityMeta.queriesSucceeded.push(name);
+      reliabilityMeta.queryDurations[name] = durationMs;
+      logger.info(`[Today] Query succeeded: ${name}`, {userId, durationMs, requestId: req.requestId});
+      return result;
+    } catch (error) {
+      const durationMs = Date.now() - startTime;
+      reliabilityMeta.ok = false;
+      reliabilityMeta.queriesFailed.push(name);
+      reliabilityMeta.queryDurations[name] = durationMs;
+      logger.error(`[Today] Query failed: ${name}`, {
+        userId,
+        durationMs,
+        error: error.message,
+        stack: error.stack,
+        requestId: req.requestId,
+      });
+      return fallbackValue;
+    }
+  };
+  
   // Compute total receivable (all unpaid amounts)
-  const receivable = await computeReceivable(userId);
+  const receivable = await executeQuery(
+    'receivable',
+    () => computeReceivable(userId),
+    {total: 0, count: 0}
+  );
   
   // Compute overdue (bills with dueDate < nowIST)
-  const overdue = await computeOverdue(userId, nowIST, todayStartIST);
+  const overdue = await executeQuery(
+    'overdue',
+    () => computeOverdue(userId, nowIST, todayStartIST),
+    {total: 0, count: 0, bills: []}
+  );
   
   // Compute due today (bills with dueDate within today IST)
-  const dueToday = await computeDueToday(userId, todayStartIST, todayEndIST);
+  const dueToday = await executeQuery(
+    'dueToday',
+    () => computeDueToday(userId, todayStartIST, todayEndIST),
+    {total: 0, count: 0, bills: []}
+  );
   
   // Compute broken promises (promiseAt < nowIST, promiseStatus BROKEN/OVERDUE, unpaid)
-  const brokenPromises = await computeBrokenPromises(userId, nowIST, todayStartIST);
+  const brokenPromises = await executeQuery(
+    'brokenPromises',
+    () => computeBrokenPromises(userId, nowIST, todayStartIST),
+    {total: 0, count: 0}
+  );
   
   // Compute chase counts
-  const chaseCounts = await computeChaseCounts(userId, todayStartIST, todayEndIST, nowIST);
+  const chaseCounts = await executeQuery(
+    'chaseCounts',
+    () => computeChaseCounts(userId, todayStartIST, todayEndIST, nowIST),
+    {promisesDueToday: 0, followUpsDueToday: 0, totalChaseItems: 0}
+  );
   
   res.success({
     date: todayStartIST.toISOString().split('T')[0],
@@ -76,6 +131,7 @@ const getTodaySummary = asyncHandler(async (req, res) => {
       sources: ['Bills', 'Promises', 'FollowUps'],
       requestId: req.requestId,
     },
+    reliabilityMeta,
   });
 });
 
@@ -575,6 +631,9 @@ async function computeOverdue(userId, nowIST, todayStartIST) {
     isDeleted: {$ne: true},
     status: {$in: ['unpaid', 'partial']},
     dueDate: {$lt: todayStartIST}, // Bills due before start of today (IST)
+    // Exclude disputed or paused bills from recovery
+    disputeStatus: {$ne: 'open'},
+    recoveryPaused: {$ne: true},
   });
   
   let total = 0;
@@ -600,6 +659,9 @@ async function computeDueToday(userId, todayStart, todayEnd) {
     isDeleted: {$ne: true},
     status: {$in: ['unpaid', 'partial']},
     dueDate: {$gte: todayStart, $lte: todayEnd},
+    // Exclude disputed or paused bills from recovery
+    disputeStatus: {$ne: 'open'},
+    recoveryPaused: {$ne: true},
   });
   
   let total = 0;

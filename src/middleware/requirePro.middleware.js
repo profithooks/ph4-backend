@@ -20,7 +20,10 @@ const AppError = require('../utils/AppError');
  * Or per-route:
  *   router.get('/bills', protect, requirePro, listBills);
  * 
- * @throws 403 PRO_REQUIRED if user is on free plan
+ * Security: Verifies BOTH planStatus='pro' AND active subscription with valid expiresAt
+ * This prevents Pro leakage when subscription expires but planStatus not yet updated
+ * 
+ * @throws 403 PRO_REQUIRED if user is on free plan or subscription expired
  */
 const requirePro = asyncHandler(async (req, res, next) => {
   // Ensure user is authenticated
@@ -30,15 +33,41 @@ const requirePro = asyncHandler(async (req, res, next) => {
 
   const planStatus = req.user.planStatus;
 
-  // Pro users: allowed
-  if (planStatus === 'pro') {
-    console.log(`[RequirePro] Pro user ${req.user._id} allowed`);
-    return next();
-  }
-
   // Trial users: allowed (Pro features included in trial)
   if (planStatus === 'trial') {
     console.log(`[RequirePro] Trial user ${req.user._id} allowed`);
+    return next();
+  }
+
+  // Pro users: verify active subscription with valid expiry
+  if (planStatus === 'pro') {
+    // Additional check: verify subscription is actually active (not just planStatus)
+    // This is a safety net in case cron/middleware missed an expiry
+    const Subscription = require('../models/Subscription');
+    const activeSubscription = await Subscription.findOne({
+      userId: req.user._id,
+      status: 'active',
+      expiresAt: { $gt: new Date() }, // Must expire in future
+    });
+
+    if (!activeSubscription) {
+      // Pro status but no active subscription - expired or invalid
+      console.warn(`[RequirePro] Pro user ${req.user._id} has no active subscription - blocking`);
+      
+      return res.status(403).json({
+        success: false,
+        code: 'PRO_EXPIRED',
+        message: 'Your Pro subscription has expired. Please renew to continue.',
+        meta: {
+          planStatus: 'pro',
+          subscriptionExpired: true,
+          feature: 'pro_feature',
+          upgradeUrl: '/pro/upgrade',
+        },
+      });
+    }
+
+    console.log(`[RequirePro] Pro user ${req.user._id} allowed (subscription expires: ${activeSubscription.expiresAt})`);
     return next();
   }
 
@@ -53,7 +82,7 @@ const requirePro = asyncHandler(async (req, res, next) => {
       meta: {
         planStatus: 'free',
         feature: 'pro_feature',
-        upgradeUrl: '/pro/upgrade', // Future: link to upgrade page
+        upgradeUrl: '/pro/upgrade',
       },
     });
   }

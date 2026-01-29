@@ -31,6 +31,7 @@ const {startNotificationDeliveryCron} = require('./cron/notificationDelivery.cro
 const {startNotificationGenerationCron} = require('./cron/notificationGeneration.cron');
 const {scheduleIntegrityChecks} = require('./cron/integrityCheck.cron');
 const {startRecoveryTaskCron} = require('./cron/recoveryTaskProcessing.cron');
+const {startProExpiryCron} = require('./cron/proExpiry.cron');
 
 // Connect to database
 connectDB();
@@ -47,6 +48,7 @@ const server = app.listen(PORT, () => {
   startNotificationDeliveryCron();
   startNotificationGenerationCron(); // Notification generation (15min + daily)
   scheduleIntegrityChecks();
+  startProExpiryCron(); // Pro expiry check (daily at midnight IST)
   
   // MULTI-INSTANCE SAFE: Recovery cron uses distributed lock (CronLock model)
   // Safe to start on all instances - only ONE will execute per interval

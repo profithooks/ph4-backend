@@ -50,6 +50,7 @@ const auditEventSchema = new mongoose.Schema(
         'BILL_UPDATED',
         'BILL_DELETED',
         'BILL_STATUS_CHANGED',
+        'BILL_SHARE_ACCESSED', // Public bill link accessed
         
         // Customer Operations (Step 5)
         'CUSTOMER_CREATED',
@@ -68,6 +69,9 @@ const auditEventSchema = new mongoose.Schema(
         'PROMISE_UPDATED',
         'PROMISE_CANCELLED',
         'PROMISE_BROKEN',         // Step 6: Promise marked as broken
+        
+        // Pro Subscription Operations
+        'PRO_PURCHASED',          // Pro subscription purchased and activated
       ],
       required: true,
       index: true,
@@ -76,7 +80,7 @@ const auditEventSchema = new mongoose.Schema(
     // What entity was affected
     entityType: {
       type: String,
-      enum: ['CUSTOMER', 'BILL', 'LEDGER', 'FOLLOWUP', 'RECOVERY', 'PROMISE', 'RECOVERY_CASE'],
+      enum: ['CUSTOMER', 'BILL', 'LEDGER', 'FOLLOWUP', 'RECOVERY', 'PROMISE', 'RECOVERY_CASE', 'SUBSCRIPTION'],
       required: true,
     },
     

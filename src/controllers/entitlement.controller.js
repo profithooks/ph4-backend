@@ -8,6 +8,7 @@
 const asyncHandler = require('express-async-handler');
 const AppError = require('../utils/AppError');
 const Subscription = require('../models/Subscription');
+const { getISTDateString } = require('../utils/timezone.util');
 
 /**
  * Get user's current entitlement status
@@ -100,7 +101,13 @@ const getEntitlement = asyncHandler(async (req, res) => {
     notes.reason = 'Daily customer write limit reached. Resets at midnight IST.';
   }
   
-  // Step 8: Return comprehensive entitlement contract
+  // Step 8: Calculate isProActive (Pro status + active subscription)
+  const isProActive = user.planStatus === 'pro' && proExpiryInfo !== null;
+  
+  // Step 9: Get current IST date string for daily write counter display
+  const writeDate = getISTDateString();
+  
+  // Step 10: Return comprehensive entitlement contract
   res.status(200).json({
     success: true,
     data: {
@@ -109,10 +116,15 @@ const getEntitlement = asyncHandler(async (req, res) => {
       isTrialActive,
       trialDaysLeft,
       
-      // Pro expiry info (null if not Pro or no active subscription)
+      // Pro status and expiry info
+      isProActive,
       proExpiresAt: proExpiryInfo?.expiresAt || null,
       proExpiresInDays: proExpiryInfo?.daysLeft ?? null,
       isProExpiring: proExpiryInfo?.isExpiring || false,
+      
+      // Daily write counter with IST date context
+      writeDate, // YYYY-MM-DD in IST (for daily reset context)
+      remainingDailyWrites: limits.customerWritesRemainingToday,
       
       limits,
       permissions,

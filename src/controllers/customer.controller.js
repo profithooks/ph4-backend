@@ -13,6 +13,8 @@ const FollowUpTask = require('../models/FollowUpTask');
 const AppError = require('../utils/AppError');
 const {auditCreate, auditUpdate, auditDelete} = require('../services/auditHelper.service');
 const {getUserRole} = require('../middleware/permission.middleware');
+const {importCustomers, validateCSV} = require('../services/customerImport.service');
+const logger = require('../utils/logger');
 
 // @desc    Get all customers
 // @route   GET /api/customers
@@ -421,10 +423,118 @@ const deleteCustomer = asyncHandler(async (req, res) => {
   });
 });
 
+// @desc    Import customers from CSV
+// @route   POST /api/v1/customers/import
+// @access  Private
+const importCustomersFromCSV = asyncHandler(async (req, res) => {
+  const userId = req.user._id;
+  const businessId = req.user.businessId || userId;
+  
+  // Handle multipart/form-data (file upload) or raw CSV text
+  let csvContent;
+  
+  if (req.file) {
+    // File uploaded via multipart
+    csvContent = req.file.buffer.toString('utf-8');
+    logger.info('[CustomerImport] Processing uploaded CSV file', {
+      userId,
+      businessId,
+      filename: req.file.originalname,
+      size: req.file.size,
+    });
+  } else if (req.body.csv) {
+    // Raw CSV text in body
+    csvContent = req.body.csv;
+    logger.info('[CustomerImport] Processing raw CSV text', {
+      userId,
+      businessId,
+      length: csvContent.length,
+    });
+  } else {
+    throw new AppError(
+      'Please provide CSV file or CSV text in body',
+      400,
+      'NO_CSV_DATA'
+    );
+  }
+  
+  // Parse options
+  const options = {
+    skipDuplicates: req.body.skipDuplicates !== 'false', // Default true
+    updateDuplicates: req.body.updateDuplicates === 'true', // Default false
+    previewLimit: parseInt(req.body.previewLimit, 10) || 10,
+  };
+  
+  // Import customers
+  const result = await importCustomers({
+    userId,
+    csvContent,
+    options,
+  });
+  
+  // Audit log for import action
+  logger.info('[CustomerImport] Import completed', {
+    userId,
+    businessId,
+    totalRows: result.totalRows,
+    importedCount: result.importedCount,
+    skippedCount: result.skippedCount,
+    updatedCount: result.updatedCount,
+    errorCount: result.errorCount,
+    requestId: req.requestId,
+  });
+  
+  // Create audit event
+  await auditCreate({
+    action: 'CUSTOMERS_IMPORTED',
+    actorUserId: userId,
+    actorRole: getUserRole(req),
+    entityType: 'CUSTOMER',
+    entity: null,
+    businessId,
+    metadata: {
+      totalRows: result.totalRows,
+      importedCount: result.importedCount,
+      skippedCount: result.skippedCount,
+      updatedCount: result.updatedCount,
+      errorCount: result.errorCount,
+      importedCustomerIds: result.imported.map(c => c.customerId),
+    },
+    requestId: req.requestId,
+  });
+  
+  res.success(result, 200);
+});
+
+// @desc    Validate CSV format (preview without importing)
+// @route   POST /api/v1/customers/import/validate
+// @access  Private
+const validateCustomersCSV = asyncHandler(async (req, res) => {
+  let csvContent;
+  
+  if (req.file) {
+    csvContent = req.file.buffer.toString('utf-8');
+  } else if (req.body.csv) {
+    csvContent = req.body.csv;
+  } else {
+    throw new AppError(
+      'Please provide CSV file or CSV text in body',
+      400,
+      'NO_CSV_DATA'
+    );
+  }
+  
+  const result = validateCSV(csvContent);
+  
+  res.success(result, 200);
+});
+
 module.exports = {
   getCustomers,
   createCustomer,
   updateCustomer,
   getCustomerTimeline,
   deleteCustomer,
+  importCustomersFromCSV,
+  validateCustomersCSV,
 };

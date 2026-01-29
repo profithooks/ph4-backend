@@ -13,9 +13,8 @@ const subscriptionSchema = new mongoose.Schema(
     },
     planId: {
       type: String,
-      enum: ['ph4_pro_monthly'],
+      enum: ['monthly', 'quarterly', 'yearly', 'ph4_pro_monthly'], // Legacy 'ph4_pro_monthly' kept for existing records
       required: true,
-      default: 'ph4_pro_monthly',
     },
     provider: {
       type: String,

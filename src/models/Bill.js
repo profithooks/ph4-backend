@@ -104,6 +104,50 @@ const billSchema = new mongoose.Schema(
       sparse: true,
     },
     
+    // Dispute & Recovery Pause (Step 9: Dispute Resolution)
+    disputeStatus: {
+      type: String,
+      enum: ['none', 'open', 'resolved'],
+      default: 'none',
+      index: true,
+    },
+    disputeReason: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    disputeNotes: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    disputeOpenedAt: {
+      type: Date,
+      default: null,
+    },
+    disputeResolvedAt: {
+      type: Date,
+      default: null,
+    },
+    recoveryPaused: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    recoveryPausedAt: {
+      type: Date,
+      default: null,
+    },
+    recoveryPausedUntil: {
+      type: Date,
+      default: null,
+    },
+    recoveryPausedReason: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    
     // Soft Delete (Step 5: Staff Accountability)
     isDeleted: {
       type: Boolean,
@@ -186,6 +230,45 @@ billSchema.on('index', (error) => {
     console.log('[Bill] Indexes built successfully');
   }
 });
+
+/**
+ * Check if bill should be excluded from recovery/follow-up
+ * @returns {boolean} - true if bill should be excluded
+ */
+billSchema.methods.isExcludedFromRecovery = function () {
+  // Exclude if disputed
+  if (this.disputeStatus === 'open') {
+    return true;
+  }
+  
+  // Exclude if recovery is paused
+  if (this.recoveryPaused) {
+    // Check if pause has expired
+    if (this.recoveryPausedUntil) {
+      const now = new Date();
+      if (now < this.recoveryPausedUntil) {
+        return true; // Pause is still active
+      }
+      // Pause expired but flag not reset - still exclude to be safe
+      return true;
+    }
+    // No expiry date, indefinite pause
+    return true;
+  }
+  
+  return false;
+};
+
+/**
+ * Check if recovery pause has expired
+ * @returns {boolean} - true if pause has expired
+ */
+billSchema.methods.isRecoveryPauseExpired = function () {
+  if (!this.recoveryPaused || !this.recoveryPausedUntil) {
+    return false;
+  }
+  return new Date() >= this.recoveryPausedUntil;
+};
 
 const Bill = mongoose.model('Bill', billSchema);
 

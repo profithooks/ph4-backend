@@ -1,3 +1,4 @@
+const asyncHandler = require('express-async-handler');
 const Bill = require('../models/Bill');
 const LedgerTransaction = require('../models/LedgerTransaction');
 const Customer = require('../models/Customer');
@@ -954,6 +955,223 @@ exports.deleteBill = async (req, res, next) => {
   }
 };
 
+// @desc    Mark bill as disputed
+// @route   PATCH /api/v1/bills/:id/dispute
+// @access  Private
+exports.markBillDisputed = asyncHandler(async (req, res) => {
+  const userId = req.user._id;
+  const {reason, notes} = req.body;
+  
+  // Get bill
+  const bill = await Bill.findOne({
+    _id: req.params.id,
+    userId,
+    isDeleted: {$ne: true},
+  });
+  
+  if (!bill) {
+    throw new AppError('Bill not found', 404, 'BILL_NOT_FOUND');
+  }
+  
+  // Update dispute status
+  bill.disputeStatus = 'open';
+  bill.disputeReason = reason || '';
+  bill.disputeNotes = notes || '';
+  bill.disputeOpenedAt = new Date();
+  
+  await bill.save();
+  
+  // Audit event
+  const {auditUpdate} = require('../services/auditHelper.service');
+  await auditUpdate({
+    action: 'BILL_DISPUTED',
+    actorUserId: userId,
+    actorRole: getUserRole(req),
+    entityType: 'BILL',
+    beforeEntity: {disputeStatus: 'none'},
+    afterEntity: bill,
+    customerId: bill.customerId,
+    businessId: req.user.businessId,
+    metadata: {
+      billNo: bill.billNo,
+      reason,
+      notes,
+    },
+    requestId: req.requestId,
+  });
+  
+  logger.info('[Bill] Bill marked as disputed', {
+    billId: bill._id,
+    billNo: bill.billNo,
+    reason,
+  });
+  
+  res.success(bill, 200);
+});
+
+// @desc    Resolve bill dispute
+// @route   PATCH /api/v1/bills/:id/dispute/resolve
+// @access  Private
+exports.resolveBillDispute = asyncHandler(async (req, res) => {
+  const userId = req.user._id;
+  const {notes} = req.body;
+  
+  // Get bill
+  const bill = await Bill.findOne({
+    _id: req.params.id,
+    userId,
+    isDeleted: {$ne: true},
+  });
+  
+  if (!bill) {
+    throw new AppError('Bill not found', 404, 'BILL_NOT_FOUND');
+  }
+  
+  if (bill.disputeStatus !== 'open') {
+    throw new AppError('Bill is not disputed', 400, 'NOT_DISPUTED');
+  }
+  
+  // Update dispute status
+  bill.disputeStatus = 'resolved';
+  bill.disputeNotes = notes || bill.disputeNotes;
+  bill.disputeResolvedAt = new Date();
+  
+  await bill.save();
+  
+  // Audit event
+  const {auditUpdate} = require('../services/auditHelper.service');
+  await auditUpdate({
+    action: 'BILL_DISPUTE_RESOLVED',
+    actorUserId: userId,
+    actorRole: getUserRole(req),
+    entityType: 'BILL',
+    beforeEntity: {disputeStatus: 'open'},
+    afterEntity: bill,
+    customerId: bill.customerId,
+    businessId: req.user.businessId,
+    metadata: {
+      billNo: bill.billNo,
+      notes,
+    },
+    requestId: req.requestId,
+  });
+  
+  logger.info('[Bill] Bill dispute resolved', {
+    billId: bill._id,
+    billNo: bill.billNo,
+  });
+  
+  res.success(bill, 200);
+});
+
+// @desc    Pause recovery for bill
+// @route   PATCH /api/v1/bills/:id/recovery/pause
+// @access  Private
+exports.pauseBillRecovery = asyncHandler(async (req, res) => {
+  const userId = req.user._id;
+  const {pausedUntil, reason} = req.body;
+  
+  // Get bill
+  const bill = await Bill.findOne({
+    _id: req.params.id,
+    userId,
+    isDeleted: {$ne: true},
+  });
+  
+  if (!bill) {
+    throw new AppError('Bill not found', 404, 'BILL_NOT_FOUND');
+  }
+  
+  // Update recovery pause status
+  bill.recoveryPaused = true;
+  bill.recoveryPausedAt = new Date();
+  bill.recoveryPausedUntil = pausedUntil ? new Date(pausedUntil) : null;
+  bill.recoveryPausedReason = reason || '';
+  
+  await bill.save();
+  
+  // Audit event
+  const {auditUpdate} = require('../services/auditHelper.service');
+  await auditUpdate({
+    action: 'BILL_RECOVERY_PAUSED',
+    actorUserId: userId,
+    actorRole: getUserRole(req),
+    entityType: 'BILL',
+    beforeEntity: {recoveryPaused: false},
+    afterEntity: bill,
+    customerId: bill.customerId,
+    businessId: req.user.businessId,
+    metadata: {
+      billNo: bill.billNo,
+      pausedUntil,
+      reason,
+    },
+    requestId: req.requestId,
+  });
+  
+  logger.info('[Bill] Bill recovery paused', {
+    billId: bill._id,
+    billNo: bill.billNo,
+    pausedUntil,
+    reason,
+  });
+  
+  res.success(bill, 200);
+});
+
+// @desc    Resume recovery for bill
+// @route   PATCH /api/v1/bills/:id/recovery/resume
+// @access  Private
+exports.resumeBillRecovery = asyncHandler(async (req, res) => {
+  const userId = req.user._id;
+  
+  // Get bill
+  const bill = await Bill.findOne({
+    _id: req.params.id,
+    userId,
+    isDeleted: {$ne: true},
+  });
+  
+  if (!bill) {
+    throw new AppError('Bill not found', 404, 'BILL_NOT_FOUND');
+  }
+  
+  if (!bill.recoveryPaused) {
+    throw new AppError('Bill recovery is not paused', 400, 'NOT_PAUSED');
+  }
+  
+  // Update recovery pause status
+  bill.recoveryPaused = false;
+  bill.recoveryPausedUntil = null;
+  bill.recoveryPausedReason = '';
+  
+  await bill.save();
+  
+  // Audit event
+  const {auditUpdate} = require('../services/auditHelper.service');
+  await auditUpdate({
+    action: 'BILL_RECOVERY_RESUMED',
+    actorUserId: userId,
+    actorRole: getUserRole(req),
+    entityType: 'BILL',
+    beforeEntity: {recoveryPaused: true},
+    afterEntity: bill,
+    customerId: bill.customerId,
+    businessId: req.user.businessId,
+    metadata: {
+      billNo: bill.billNo,
+    },
+    requestId: req.requestId,
+  });
+  
+  logger.info('[Bill] Bill recovery resumed', {
+    billId: bill._id,
+    billNo: bill.billNo,
+  });
+  
+  res.success(bill, 200);
+});
+
 module.exports = {
   createBill: exports.createBill,
   listBills: exports.listBills,
@@ -962,4 +1180,8 @@ module.exports = {
   addBillPayment: exports.addBillPayment,
   cancelBill: exports.cancelBill,
   deleteBill: exports.deleteBill,
+  markBillDisputed: exports.markBillDisputed,
+  resolveBillDispute: exports.resolveBillDispute,
+  pauseBillRecovery: exports.pauseBillRecovery,
+  resumeBillRecovery: exports.resumeBillRecovery,
 };

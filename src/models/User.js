@@ -3,6 +3,7 @@
  */
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
+const {getISTDateString} = require('../utils/timezone.util');
 
 const userSchema = new mongoose.Schema(
   {
@@ -89,8 +90,8 @@ const userSchema = new mongoose.Schema(
       min: 0,
     },
     dailyWriteDate: {
-      type: String, // YYYY-MM-DD format
-      default: () => new Date().toISOString().split('T')[0],
+      type: String, // YYYY-MM-DD format in IST timezone
+      default: () => getISTDateString(),
     },
     
     // Step 9: Trust & Survival - Account Recovery
@@ -164,14 +165,14 @@ userSchema.methods.comparePassword = async function (enteredPassword) {
  * Call this before every write operation
  */
 userSchema.methods.ensureDailyWriteCounter = async function () {
-  const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+  const todayIST = getISTDateString(); // YYYY-MM-DD in IST timezone
   
-  if (this.dailyWriteDate !== today) {
-    // New day - reset counter
+  if (this.dailyWriteDate !== todayIST) {
+    // New day in IST - reset counter
     this.dailyWriteCount = 0;
-    this.dailyWriteDate = today;
+    this.dailyWriteDate = todayIST;
     await this.save();
-    console.log(`[User] Reset daily write counter for user ${this._id}`);
+    console.log(`[User] Reset daily write counter for user ${this._id} (IST date: ${todayIST})`);
   }
   
   return this;

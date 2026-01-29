@@ -2,12 +2,15 @@
  * Customer routes
  */
 const express = require('express');
+const multer = require('multer');
 const {
   getCustomers,
   createCustomer,
   updateCustomer,
   getCustomerTimeline,
   deleteCustomer,
+  importCustomersFromCSV,
+  validateCustomersCSV,
 } = require('../controllers/customer.controller');
 const {getCustomerNotifications} = require('../controllers/notification.controller');
 const {
@@ -28,7 +31,32 @@ const {
 
 const router = express.Router();
 
+// Multer configuration for CSV file uploads
+const upload = multer({
+  storage: multer.memoryStorage(), // Store in memory as buffer
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5MB max file size
+  },
+  fileFilter: (req, file, cb) => {
+    // Accept CSV and text files
+    if (
+      file.mimetype === 'text/csv' ||
+      file.mimetype === 'application/vnd.ms-excel' ||
+      file.mimetype === 'text/plain' ||
+      file.originalname.endsWith('.csv')
+    ) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only CSV files are allowed'), false);
+    }
+  },
+});
+
 router.use(protect);
+
+// Customer import routes (must come before /:id routes)
+router.post('/import', upload.single('file'), importCustomersFromCSV);
+router.post('/import/validate', upload.single('file'), validateCustomersCSV);
 
 // GET: read-only, no write limit
 // POST: write operation, enforce limit

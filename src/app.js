@@ -36,6 +36,7 @@ const auditRoutes = require('./routes/audit.routes');
 const todayRoutes = require('./routes/today.routes');
 const promiseRoutes = require('./routes/promise.routes');
 const insightsRoutes = require('./routes/insights.routes');
+const analyticsRoutes = require('./routes/analytics.routes');
 const securityRoutes = require('./routes/security.routes');
 const pilotModeRoutes = require('./routes/pilotMode.routes');
 const opsRoutes = require('./routes/ops.routes');
@@ -43,6 +44,7 @@ const supportRoutes = require('./routes/support.routes');
 const specComplianceRoutes = require('./routes/specCompliance.routes');
 const backupRoutes = require('./routes/backup.routes');
 const publicBillRoutes = require('./routes/publicBill.routes');
+const webhookRoutes = require('./routes/webhook.routes');
 
 // Step 23: Go-Live & Rollout Control middleware
 const {checkGlobalKillSwitch, checkFeatureKillSwitches} = require('./middleware/killSwitch.middleware');
@@ -50,14 +52,9 @@ const {checkFeatureFreeze} = require('./middleware/featureFreeze.middleware');
 
 const app = express();
 
-// Security: Trust proxy (if behind reverse proxy)
-// In production, this should be enabled to correctly detect protocol/host
-if (trustProxy) {
-  app.set('trust proxy', 1);
-} else if (process.env.NODE_ENV === 'production') {
-  // Warn if trust proxy is not enabled in production (may cause incorrect protocol detection)
-  console.warn('[WARN] TRUST_PROXY is not enabled in production. This may cause incorrect protocol/host detection behind reverse proxy.');
-}
+// Security: Trust proxy (Render/proxy correctness for req.ip)
+// MUST be set for correct IP detection behind reverse proxies (Render, Heroku, CloudFlare, etc.)
+app.set('trust proxy', 1);
 
 // Security: Disable x-powered-by header
 app.disable('x-powered-by');
@@ -70,6 +67,14 @@ app.use(compression());
 
 // Security: CORS with strict origin checking
 app.use(cors(corsOptions));
+
+// CRITICAL: Raw body middleware for webhook signature verification
+// Must be BEFORE express.json() to preserve raw request body
+// Accept all content types (including charset variations like application/json; charset=utf-8)
+app.use('/webhooks', express.raw({
+  type: '*/*',
+  limit: bodyLimits.json
+}));
 
 // Security: Body size limits
 app.use(express.json({limit: bodyLimits.json}));
@@ -126,6 +131,7 @@ app.use('/api/v1/today', todayRoutes);
 app.use('/api/v1/ops', opsRoutes); // Mount ops routes BEFORE /api/v1 to avoid conflicts
 app.use('/api/v1', promiseRoutes);
 app.use('/api/v1/insights', insightsRoutes);
+app.use('/api/v1/analytics', analyticsRoutes);
 app.use('/api/v1/security', securityRoutes);
 app.use('/api/v1', pilotModeRoutes);
 app.use('/api/v1/support', supportRoutes);
@@ -134,6 +140,9 @@ app.use('/api/v1/backup', backupRoutes);
 
 // Public routes (outside /api prefix, no auth required)
 app.use('/public', publicBillRoutes);
+
+// Webhook routes (outside /api prefix, no auth required, signature verified)
+app.use('/webhooks', webhookRoutes);
 
 // Health check (legacy, kept for backward compatibility)
 app.get('/health', (req, res) => {

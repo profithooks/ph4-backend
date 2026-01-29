@@ -146,6 +146,32 @@ function formatIST(date) {
   return istDate.toISOString().replace('T', ' ').replace('Z', ' IST');
 }
 
+/**
+ * Get date string in YYYY-MM-DD format for IST timezone
+ * CRITICAL: Use this for daily resets, not UTC-based date strings
+ * 
+ * @param {Date|string|number} [date] - Date to format (defaults to now IST)
+ * @returns {string} - Date string in YYYY-MM-DD format (IST timezone)
+ * 
+ * @example
+ * // At 2026-01-29 23:45 UTC (2026-01-30 05:15 IST)
+ * getISTDateString() // Returns '2026-01-30' (IST date, not UTC '2026-01-29')
+ */
+function getISTDateString(date) {
+  const targetDate = date ? new Date(date) : getNowIST();
+  
+  // Convert to IST if not already
+  const utc = targetDate.getTime() + (targetDate.getTimezoneOffset() * 60000);
+  const istDate = new Date(utc + IST_OFFSET_MS);
+  
+  // Extract date components in IST
+  const year = istDate.getFullYear();
+  const month = String(istDate.getMonth() + 1).padStart(2, '0');
+  const day = String(istDate.getDate()).padStart(2, '0');
+  
+  return `${year}-${month}-${day}`;
+}
+
 module.exports = {
   getNowIST,
   getStartOfDayIST,
@@ -154,6 +180,7 @@ module.exports = {
   getDaysOverdueIST,
   bucketDateIST,
   formatIST,
+  getISTDateString,
   // Export constant for advanced usage
   IST_OFFSET_MS,
 };

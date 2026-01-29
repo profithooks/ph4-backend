@@ -1,8 +1,12 @@
 const BillShareLink = require('../models/BillShareLink');
 const Bill = require('../models/Bill');
 const Customer = require('../models/Customer');
+const Payment = require('../models/Payment');
+const AuditEvent = require('../models/AuditEvent');
 const AppError = require('../utils/AppError');
 const logger = require('../utils/logger');
+const {createBillPaymentOrder} = require('../services/razorpay.service');
+const {razorpayKeyId} = require('../config/env');
 
 /**
  * Sanitize bill data for public display (no PII leakage)
@@ -489,6 +493,32 @@ exports.getPublicBill = async (req, res, next) => {
     shareLink.accessCount += 1;
     await shareLink.save();
 
+    // Create audit event for public bill access
+    try {
+      await AuditEvent.create({
+        actorUserId: bill.userId,
+        actorRole: 'SYSTEM',
+        action: 'BILL_SHARE_ACCESSED',
+        entityType: 'BILL',
+        entityId: bill._id,
+        businessId: bill.userId,
+        metadata: {
+          shareTokenPrefix: token.substring(0, 8),
+          accessCount: shareLink.accessCount,
+          via: 'public_link_html',
+          ip: req.ip || req.connection?.remoteAddress || 'unknown',
+          userAgent: req.get('user-agent') || 'unknown',
+        },
+      });
+    } catch (auditError) {
+      // Don't fail the request if audit fails
+      logger.error('[PublicBill] Audit event creation failed', {
+        billId: bill._id,
+        error: auditError.message,
+        requestId: req.requestId,
+      });
+    }
+
     // Sanitize and render
     const billData = sanitizeBillForPublic(bill, customer);
     const html = renderBillHtml(billData);
@@ -550,6 +580,32 @@ exports.getPublicBillJson = async (req, res, next) => {
     shareLink.accessCount += 1;
     await shareLink.save();
 
+    // Create audit event for public bill access
+    try {
+      await AuditEvent.create({
+        actorUserId: bill.userId,
+        actorRole: 'SYSTEM',
+        action: 'BILL_SHARE_ACCESSED',
+        entityType: 'BILL',
+        entityId: bill._id,
+        businessId: bill.userId,
+        metadata: {
+          shareTokenPrefix: token.substring(0, 8),
+          accessCount: shareLink.accessCount,
+          via: 'public_link_json',
+          ip: req.ip || req.connection?.remoteAddress || 'unknown',
+          userAgent: req.get('user-agent') || 'unknown',
+        },
+      });
+    } catch (auditError) {
+      // Don't fail the request if audit fails
+      logger.error('[PublicBill] Audit event creation failed', {
+        billId: bill._id,
+        error: auditError.message,
+        requestId: req.requestId,
+      });
+    }
+
     // Sanitize and return
     const billData = sanitizeBillForPublic(bill, customer, shopName);
 
@@ -566,6 +622,155 @@ exports.getPublicBillJson = async (req, res, next) => {
       requestId: req.requestId,
       error: error.message,
       stack: error.stack,
+    });
+    next(error);
+  }
+};
+
+/**
+ * Create Razorpay order for public bill payment
+ * POST /public/b/:token/pay/create
+ */
+exports.createPublicBillPayment = async (req, res, next) => {
+  const {token} = req.params;
+  
+  try {
+    // Step 1: Find share link
+    const shareLink = await BillShareLink.findOne({
+      token,
+      status: 'active',
+    });
+    
+    if (!shareLink) {
+      throw new AppError('Bill link not found or expired', 404, 'LINK_NOT_FOUND');
+    }
+    
+    // Step 2: Get bill
+    const bill = await Bill.findOne({
+      _id: shareLink.billId,
+      isDeleted: {$ne: true},
+    });
+    
+    if (!bill) {
+      throw new AppError('Bill not found', 404, 'BILL_NOT_FOUND');
+    }
+    
+    // Step 3: Check if bill is already paid
+    if (bill.status === 'paid') {
+      throw new AppError('Bill is already paid', 400, 'ALREADY_PAID');
+    }
+    
+    // Step 4: Calculate pending amount
+    const pendingAmount = bill.grandTotal - (bill.paidAmount || 0);
+    
+    if (pendingAmount <= 0) {
+      throw new AppError('No pending amount', 400, 'NO_PENDING_AMOUNT');
+    }
+    
+    // Step 5: Get customer details
+    const customer = await Customer.findById(bill.customerId);
+    
+    // Step 6: Check for existing pending payment
+    const existingPayment = await Payment.findOne({
+      billId: bill._id,
+      status: 'pending',
+    });
+    
+    if (existingPayment) {
+      // Return existing order
+      logger.info('[PublicBill] Returning existing pending payment', {
+        billId: bill._id,
+        orderId: existingPayment.providerOrderId,
+      });
+      
+      return res.json({
+        success: true,
+        data: {
+          orderId: existingPayment.providerOrderId,
+          amount: existingPayment.amount,
+          currency: existingPayment.currency,
+          keyId: razorpayKeyId,
+          bill: {
+            billNo: bill.billNo,
+            grandTotal: bill.grandTotal,
+            pendingAmount,
+          },
+        },
+      });
+    }
+    
+    // Step 7: Create Razorpay order
+    const order = await createBillPaymentOrder({
+      billId: bill._id.toString(),
+      billNo: bill.billNo,
+      amount: pendingAmount,
+      currency: 'INR',
+      customerName: customer?.name || '',
+      customerEmail: customer?.email || '',
+      customerPhone: customer?.phone || '',
+    });
+    
+    // Step 8: Save payment record
+    const payment = await Payment.create({
+      billId: bill._id,
+      userId: bill.userId,
+      businessId: bill.userId, // For bills, businessId = userId
+      customerId: bill.customerId,
+      provider: 'razorpay',
+      providerOrderId: order.orderId,
+      status: 'pending',
+      amount: pendingAmount,
+      currency: order.currency,
+      customerEmail: customer?.email || '',
+      customerPhone: customer?.phone || '',
+      metadata: {
+        billNo: bill.billNo,
+        shareToken: token,
+      },
+    });
+    
+    // Step 9: Update share link access count
+    shareLink.accessCount = (shareLink.accessCount || 0) + 1;
+    shareLink.lastAccessAt = new Date();
+    await shareLink.save();
+    
+    logger.info('[PublicBill] Payment order created', {
+      billId: bill._id,
+      paymentId: payment._id,
+      orderId: order.orderId,
+      amount: pendingAmount,
+      requestId: req.requestId,
+    });
+    
+    // Step 10: Return order details for Razorpay checkout
+    res.json({
+      success: true,
+      data: {
+        orderId: order.orderId,
+        amount: order.amount, // Amount in paise
+        currency: order.currency,
+        keyId: razorpayKeyId,
+        bill: {
+          billNo: bill.billNo,
+          grandTotal: bill.grandTotal,
+          pendingAmount,
+        },
+        customer: {
+          name: customer?.name || '',
+          email: customer?.email || '',
+          phone: customer?.phone || '',
+        },
+      },
+    });
+  } catch (error) {
+    if (error instanceof AppError) {
+      return next(error);
+    }
+    logger.error('[PublicBill] Create payment error', {
+      token,
+      error: error.message,
+      stack: error.stack,
+      requestId: req.requestId,
     });
     next(error);
   }

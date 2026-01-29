@@ -17,6 +17,10 @@ const {
   addBillPayment,
   cancelBill,
   deleteBill,
+  markBillDisputed,
+  resolveBillDispute,
+  pauseBillRecovery,
+  resumeBillRecovery,
 } = require('../controllers/bill.controller');
 const {requireOwner} = require('../middleware/permission.middleware');
 const billShareRoutes = require('./billShare.routes');
@@ -42,6 +46,14 @@ router.post('/', requirePro, validate(createBillSchema), createBill);
 // Bill actions - Pro/Trial only
 router.patch('/:id/pay', validateObjectId('id'), requirePro, validate(addPaymentSchema), addBillPayment);
 router.patch('/:id/cancel', validateObjectId('id'), requirePro, validate(cancelBillSchema), cancelBill);
+
+// Dispute management - Pro/Trial only
+router.patch('/:id/dispute', validateObjectId('id'), requirePro, markBillDisputed);
+router.patch('/:id/dispute/resolve', validateObjectId('id'), requirePro, resolveBillDispute);
+
+// Recovery pause/resume - Pro/Trial only
+router.patch('/:id/recovery/pause', validateObjectId('id'), requirePro, pauseBillRecovery);
+router.patch('/:id/recovery/resume', validateObjectId('id'), requirePro, resumeBillRecovery);
 
 // Bill deletion - Pro/Trial only + owner permission
 router.delete('/:id', validateObjectId('id'), requireOwner, requirePro, deleteBill);
