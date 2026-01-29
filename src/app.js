@@ -136,8 +136,8 @@ app.use('/api/v1/analytics', analyticsRoutes);
 app.use('/api/v1/security', securityRoutes);
 app.use('/api/v1', pilotModeRoutes);
 app.use('/api/v1/support', supportRoutes);
-app.use('/api/v1/dev', specComplianceRoutes);
-app.use('/api/v1/dev', devPushRoutes); // Dev push notification testing
+app.use('/api/v1/dev', devPushRoutes); // Dev push notification testing (MUST be before specCompliance)
+app.use('/api/v1/dev', specComplianceRoutes); // Has catch-all, so mount last
 app.use('/api/v1/backup', backupRoutes);
 
 // Public routes (outside /api prefix, no auth required)
