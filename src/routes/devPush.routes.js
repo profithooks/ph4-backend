@@ -6,7 +6,7 @@
 const express = require('express');
 const router = express.Router();
 const { protect } = require('../middleware/auth.middleware');
-const { testPushNotification } = require('../controllers/devPush.controller');
+const { testPushNotification, broadcastPushNotification } = require('../controllers/devPush.controller');
 
 /**
  * Security middleware: Verify DEV_PUSH_KEY header
@@ -65,6 +65,23 @@ router.post(
   protect,           // Require JWT auth
   requireDevPushKey, // Require DEV_PUSH_KEY header
   testPushNotification
+);
+
+/**
+ * POST /api/v1/dev/push/broadcast
+ * Broadcast push notification to ALL devices with FCM tokens
+ * 
+ * Security:
+ * - JWT authentication (protect middleware)
+ * - DEV_PUSH_KEY header (requireDevPushKey middleware)
+ * 
+ * Warning: Sends to ALL devices, not just authenticated user's
+ */
+router.post(
+  '/push/broadcast',
+  protect,           // Require JWT auth
+  requireDevPushKey, // Require DEV_PUSH_KEY header
+  broadcastPushNotification
 );
 
 module.exports = router;
