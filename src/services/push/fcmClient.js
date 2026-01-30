@@ -137,13 +137,24 @@ async function sendToTokens({tokens, title, body, data = {}}) {
       // Android-specific options
       android: {
         priority: 'high',
+        notification: {
+          sound: 'default',
+        },
       },
-      // APNs-specific options
+      // APNs-specific options (iOS)
       apns: {
+        headers: {
+          'apns-priority': '10',
+        },
         payload: {
           aps: {
+            alert: {
+              title,
+              body,
+            },
             sound: 'default',
             badge: 1,
+            'content-available': 1,
           },
         },
       },
@@ -154,7 +165,33 @@ async function sendToTokens({tokens, title, body, data = {}}) {
       ...message,
     };
 
+    // Log the exact message being sent
+    logger.info('[FCMClient] Sending FCM message', {
+      tokenCount: tokens.length,
+      message: {
+        notification: message.notification,
+        dataKeys: Object.keys(stringifiedData),
+        hasAndroidConfig: !!message.android,
+        hasApnsConfig: !!message.apns,
+      },
+    });
+
     const response = await admin.messaging().sendEachForMulticast(multicastMessage);
+
+    // Log the raw Firebase response
+    logger.info('[FCMClient] Raw Firebase response received', {
+      successCount: response.successCount,
+      failureCount: response.failureCount,
+      responses: response.responses.map((r, idx) => ({
+        token: tokens[idx].substring(0, 20) + '...',
+        success: r.success,
+        messageId: r.messageId || null,
+        error: r.error ? {
+          code: r.error.code,
+          message: r.error.message,
+        } : null,
+      })),
+    });
 
     // Normalize responses
     const responses = [];
