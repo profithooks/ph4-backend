@@ -143,7 +143,10 @@ class FirebasePushTransport extends BaseTransport {
 
       const tokens = devices.map(d => d.fcmToken).filter(Boolean);
 
+      console.log('[FirebasePushTransport] 🔍 Devices found:', devices.length, 'Tokens extracted:', tokens.length);
+
       if (tokens.length === 0) {
+        console.log('[FirebasePushTransport] ⚠️ No valid FCM tokens - returning early');
         logger.debug('[FirebasePushTransport] No valid FCM tokens found', {
           userId: user._id,
           deviceCount: devices.length,
@@ -161,12 +164,23 @@ class FirebasePushTransport extends BaseTransport {
       // Build data payload
       const data = this._buildDataPayload(notification);
 
+      console.log('[FirebasePushTransport] 📨 About to call sendToTokens with:', {
+        tokenCount: tokens.length,
+        title,
+        bodyPreview: body.substring(0, 50),
+      });
+
       // Send via FCM
       const result = await sendToTokens({
         tokens,
         title,
         body,
         data,
+      });
+      
+      console.log('[FirebasePushTransport] 📬 sendToTokens returned:', {
+        successCount: result.successCount,
+        failureCount: result.failureCount,
       });
 
       // Handle token cleanup (remove invalid tokens)
