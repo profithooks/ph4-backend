@@ -152,18 +152,14 @@ async function sendToTokens({tokens, title, body, data = {}}) {
         },
       },
       // APNs-specific options (iOS)
+      // Note: When using top-level 'notification', don't duplicate in aps.alert
       apns: {
         headers: {
           'apns-priority': '10',
         },
         payload: {
           aps: {
-            alert: {
-              title,
-              body,
-            },
             sound: 'default',
-            badge: 1,
           },
         },
       },
