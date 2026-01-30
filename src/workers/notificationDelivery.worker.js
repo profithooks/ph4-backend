@@ -187,6 +187,14 @@ async function processAttempt(attempt) {
     // Get transport for channel
     const transport = getTransport(attempt.channel);
     
+    console.log('[NotificationWorker] 🚀 Processing attempt:', {
+      attemptId: attempt._id,
+      notificationId: notification._id,
+      channel: attempt.channel,
+      attemptNo: attempt.attemptNo,
+      transportName: transport ? transport.getName() : 'null',
+    });
+    
     logger.debug('[NotificationWorker] Processing attempt', {
       attemptId: attempt._id,
       notificationId: notification._id,
@@ -197,12 +205,20 @@ async function processAttempt(attempt) {
     // Increment attempt number
     attempt.attemptNo += 1;
     
+    console.log('[NotificationWorker] 📤 Calling transport.send() for channel:', attempt.channel);
+    
     // Send via transport
     const result = await transport.send({
       notification,
       attempt,
       user,
       customer,
+    });
+    
+    console.log('[NotificationWorker] ✅ Transport.send() returned:', {
+      ok: result.ok,
+      providerMessageId: result.providerMessageId,
+      channel: attempt.channel,
     });
     
     // Success!
