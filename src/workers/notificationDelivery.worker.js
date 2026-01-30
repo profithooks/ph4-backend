@@ -36,13 +36,24 @@ async function leaseAttempts(limit = 20) {
     ],
   };
   
+  console.log('[NotificationWorker] DEBUG: Leasing attempts with query:', JSON.stringify(query));
+  console.log('[NotificationWorker] DEBUG: Current time:', now.toISOString());
+  
   const attempts = [];
+  
+  // Check total count of attempts in DB
+  const totalAttempts = await NotificationAttempt.countDocuments({});
+  const queuedAttempts = await NotificationAttempt.countDocuments({status: 'QUEUED'});
+  console.log('[NotificationWorker] DEBUG: Total attempts in DB:', totalAttempts);
+  console.log('[NotificationWorker] DEBUG: Queued attempts:', queuedAttempts);
   
   // Find candidates
   const candidates = await NotificationAttempt.find(query)
     .sort({nextAttemptAt: 1}) // Oldest first (deterministic)
     .limit(limit)
     .lean();
+  
+  console.log('[NotificationWorker] DEBUG: Found candidates:', candidates.length);
   
   // Atomically lease each candidate
   for (const candidate of candidates) {
