@@ -140,6 +140,34 @@ const businessSettingsSchema = new mongoose.Schema(
       },
     },
     
+    // Step 24: Notification Preferences
+    notificationsEnabled: {
+      type: Boolean,
+      default: true,
+    },
+    dailyDigestEnabled: {
+      type: Boolean,
+      default: true,
+    },
+    followupAlertsEnabled: {
+      type: Boolean,
+      default: true,
+    },
+    quietHoursEnabled: {
+      type: Boolean,
+      default: false,
+    },
+    quietStart: {
+      type: String,
+      default: '22:00', // IST time format HH:mm
+      match: /^([0-1][0-9]|2[0-3]):[0-5][0-9]$/,
+    },
+    quietEnd: {
+      type: String,
+      default: '08:00', // IST time format HH:mm
+      match: /^([0-1][0-9]|2[0-3]):[0-5][0-9]$/,
+    },
+    
     // Step 17: Pilot Mode
     pilotModeEnabled: {
       type: Boolean,

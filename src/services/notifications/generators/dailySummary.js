@@ -16,23 +16,38 @@ const logger = require('../../../utils/logger');
  * Generate DAILY_SUMMARY notifications
  * 
  * @param {Object} params
- * @param {Object} params.settings - BusinessSettings object (optional, for future filtering)
+ * @param {string[]} [params.enabledUserIds] - Optional array of userIds with notifications enabled
+ * @param {Object} [params.settings] - Deprecated: BusinessSettings object (kept for backward compatibility)
  * @returns {Promise<Object>} { created: number, skipped: number }
  */
-async function generateDailySummaryNotifications({settings}) {
+async function generateDailySummaryNotifications({enabledUserIds, settings}) {
   const now = getNowIST();
   const startOfToday = getStartOfDayIST(now);
   const endOfToday = getEndOfDayIST(now);
 
   try {
-    // Get all active users (simplified - in production might filter by plan status)
-    const users = await User.find({
-      // Add any user filters if needed
-    }).select('_id businessId').lean();
+    // Build user query filter
+    const userQuery = {};
+    if (enabledUserIds && enabledUserIds.length > 0) {
+      // Filter to only enabled users
+      userQuery._id = {$in: enabledUserIds};
+    }
+
+    // Get all active users (filtered by enabledUserIds if provided)
+    const users = await User.find(userQuery).select('_id businessId').lean();
 
     if (users.length === 0) {
+      logger.debug('[DailySummary] No users to process', {
+        enabledUserIdsProvided: !!enabledUserIds,
+        enabledUserIdsCount: enabledUserIds?.length || 0,
+      });
       return {created: 0, skipped: 0};
     }
+
+    logger.debug('[DailySummary] Processing users', {
+      usersCount: users.length,
+      enabledUserIdsProvided: !!enabledUserIds,
+    });
 
     let created = 0;
     let skipped = 0;

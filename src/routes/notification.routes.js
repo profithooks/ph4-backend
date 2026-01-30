@@ -12,6 +12,7 @@ const {
   getCustomerNotifications,
   markAsRead,
   getUnreadCount,
+  markAllAsRead,
 } = require('../controllers/notification.controller');
 
 // All routes require authentication
@@ -46,5 +47,12 @@ router.get('/:id', getNotification);
  * @access  Private
  */
 router.post('/:id/read', markAsRead);
+
+/**
+ * @route   POST /api/v1/notifications/read/all
+ * @desc    Mark all notifications as read
+ * @access  Private
+ */
+router.post('/read/all', markAllAsRead);
 
 module.exports = router;

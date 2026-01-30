@@ -8,7 +8,9 @@ const NotificationAttempt = require('../models/NotificationAttempt');
 const Notification = require('../models/Notification');
 const User = require('../models/User');
 const Customer = require('../models/Customer');
+const BusinessSettings = require('../models/BusinessSettings');
 const {getTransport} = require('../services/notificationTransports');
+const {getNowIST} = require('../utils/timezone.util');
 const logger = require('../utils/logger');
 
 /**
@@ -115,6 +117,44 @@ async function processAttempt(attempt) {
     let customer = null;
     if (notification.customerId) {
       customer = await Customer.findById(notification.customerId);
+    }
+    
+    // Check quiet hours for PUSH notifications
+    if (attempt.channel === 'PUSH') {
+      const settings = await BusinessSettings.findOne({userId: user._id});
+      
+      if (settings && settings.quietHoursEnabled) {
+        const isQuietHour = checkQuietHours(
+          settings.quietStart,
+          settings.quietEnd,
+        );
+        
+        if (isQuietHour) {
+          // Reschedule for after quiet hours end
+          const nextAttempt = calculateNextAttemptAfterQuietHours(
+            settings.quietEnd,
+          );
+          
+          attempt.status = 'RETRY_SCHEDULED';
+          attempt.nextAttemptAt = nextAttempt;
+          attempt.leasedUntil = null;
+          attempt.lastError = {
+            code: 'QUIET_HOURS',
+            message: 'Notification delayed due to quiet hours',
+          };
+          
+          await attempt.save();
+          
+          logger.info('[NotificationWorker] Attempt deferred due to quiet hours', {
+            attemptId: attempt._id,
+            nextAttemptAt: nextAttempt,
+            quietStart: settings.quietStart,
+            quietEnd: settings.quietEnd,
+          });
+          
+          return {success: false, deferred: true};
+        }
+      }
     }
     
     // Get transport for channel
@@ -260,8 +300,86 @@ async function runWorker() {
   }
 }
 
+/**
+ * Check if current time is within quiet hours
+ * 
+ * @param {string} quietStart - Start time in HH:mm format (IST)
+ * @param {string} quietEnd - End time in HH:mm format (IST)
+ * @returns {boolean} True if within quiet hours
+ */
+function checkQuietHours(quietStart, quietEnd) {
+  try {
+    const nowIST = getNowIST();
+    const currentHours = nowIST.getHours();
+    const currentMinutes = nowIST.getMinutes();
+    const currentTotalMinutes = currentHours * 60 + currentMinutes;
+    
+    // Parse start and end times
+    const [startHours, startMinutes] = quietStart.split(':').map(Number);
+    const startTotalMinutes = startHours * 60 + startMinutes;
+    
+    const [endHours, endMinutes] = quietEnd.split(':').map(Number);
+    const endTotalMinutes = endHours * 60 + endMinutes;
+    
+    // Handle overnight quiet hours (e.g., 22:00 to 08:00)
+    if (startTotalMinutes > endTotalMinutes) {
+      // Overnight: quiet hours span midnight
+      return currentTotalMinutes >= startTotalMinutes || currentTotalMinutes < endTotalMinutes;
+    } else {
+      // Same day: quiet hours within a single day
+      return currentTotalMinutes >= startTotalMinutes && currentTotalMinutes < endTotalMinutes;
+    }
+  } catch (error) {
+    logger.error('[NotificationWorker] Failed to check quiet hours', {
+      error: error.message,
+      quietStart,
+      quietEnd,
+    });
+    return false; // On error, don't block delivery
+  }
+}
+
+/**
+ * Calculate next attempt time after quiet hours end
+ * 
+ * @param {string} quietEnd - End time in HH:mm format (IST)
+ * @returns {Date} Next attempt time (after quiet hours end)
+ */
+function calculateNextAttemptAfterQuietHours(quietEnd) {
+  try {
+    const nowIST = getNowIST();
+    const [endHours, endMinutes] = quietEnd.split(':').map(Number);
+    
+    // Create a date for quiet hours end time today
+    const endTime = new Date(nowIST);
+    endTime.setHours(endHours);
+    endTime.setMinutes(endMinutes);
+    endTime.setSeconds(0);
+    endTime.setMilliseconds(0);
+    
+    // If end time already passed today, schedule for tomorrow
+    if (endTime <= nowIST) {
+      endTime.setDate(endTime.getDate() + 1);
+    }
+    
+    // Add 5 minutes buffer after quiet hours end
+    endTime.setMinutes(endTime.getMinutes() + 5);
+    
+    return endTime;
+  } catch (error) {
+    logger.error('[NotificationWorker] Failed to calculate next attempt', {
+      error: error.message,
+      quietEnd,
+    });
+    // Fallback: retry in 1 hour
+    return new Date(Date.now() + 60 * 60 * 1000);
+  }
+}
+
 module.exports = {
   runWorker,
   leaseAttempts,
   processAttempt,
+  checkQuietHours, // Exported for testing
+  calculateNextAttemptAfterQuietHours, // Exported for testing
 };

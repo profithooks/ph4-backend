@@ -43,6 +43,7 @@ const opsRoutes = require('./routes/ops.routes');
 const supportRoutes = require('./routes/support.routes');
 const specComplianceRoutes = require('./routes/specCompliance.routes');
 const devPushRoutes = require('./routes/devPush.routes');
+const devNotificationsRoutes = require('./routes/devNotifications.routes');
 const backupRoutes = require('./routes/backup.routes');
 const publicBillRoutes = require('./routes/publicBill.routes');
 const webhookRoutes = require('./routes/webhook.routes');
@@ -137,6 +138,7 @@ app.use('/api/v1/security', securityRoutes);
 app.use('/api/v1', pilotModeRoutes);
 app.use('/api/v1/support', supportRoutes);
 app.use('/api/v1/dev', devPushRoutes); // Dev push notification testing (MUST be before specCompliance)
+app.use('/api/v1/dev/notifications', devNotificationsRoutes); // Dev notification generators testing
 app.use('/api/v1/dev', specComplianceRoutes); // Has catch-all, so mount last
 app.use('/api/v1/backup', backupRoutes);
 

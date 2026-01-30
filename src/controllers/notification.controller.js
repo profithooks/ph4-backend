@@ -223,10 +223,33 @@ const getUnreadCount = asyncHandler(async (req, res) => {
   res.success({count});
 });
 
+/**
+ * Mark all notifications as read
+ * POST /api/v1/notifications/read/all
+ */
+const markAllAsRead = asyncHandler(async (req, res) => {
+  const userId = req.user._id;
+  
+  const result = await Notification.updateMany(
+    {
+      userId,
+      readAt: null, // Only update unread notifications
+    },
+    {
+      $set: {readAt: new Date()},
+    }
+  );
+  
+  res.success({
+    updatedCount: result.modifiedCount || 0,
+  });
+});
+
 module.exports = {
   getNotifications,
   getNotification,
   getCustomerNotifications,
   markAsRead,
   getUnreadCount,
+  markAllAsRead,
 };

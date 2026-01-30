@@ -19,12 +19,14 @@ const {
   generateOverdueAlertNotifications,
 } = require('../services/notifications/generators/billNotifications');
 const {generateDailySummaryNotifications} = require('../services/notifications/generators/dailySummary');
+const {generateDailyDigestAM, generateDailyDigestEOD} = require('../services/notifications/generators/dailyDigest.generator');
 const {clearCache} = require('../services/notifications/channelSelector');
 const logger = require('../utils/logger');
 const {nodeEnv} = require('../config/env');
 
 let cronJob15min = null;
 let cronJobDaily = null;
+let cronJobEOD = null;
 
 /**
  * Check if notifications are enabled
@@ -129,50 +131,119 @@ async function runNotificationGenerators() {
  * Run daily summary generator (09:00 IST)
  * IST is UTC+5:30, so 09:00 IST = 03:30 UTC
  * Cron: '30 3 * * *' (03:30 UTC daily)
+ * 
+ * Runs ONCE per day, not per BusinessSettings row.
+ * Fetches enabled userIds first, then passes to generator for filtering.
  */
 async function runDailySummaryGenerator() {
+  const startTime = Date.now();
+  
   try {
-    logger.debug('[NotificationGenCron] Running daily summary generator');
+    logger.info('[NotificationGenCron] ▶️  Daily summary generator started');
 
+    // Fetch all business settings to determine which users have notifications enabled
     const settingsDocs = await BusinessSettings.find({}).lean();
 
-    if (settingsDocs.length === 0) {
+    // Extract userIds where notifications are enabled
+    const enabledUserIds = settingsDocs
+      .filter(settings => isNotificationsEnabled(settings))
+      .map(settings => String(settings.userId))
+      .filter(Boolean);
+
+    logger.debug('[NotificationGenCron] Daily summary: found enabled users', {
+      totalSettings: settingsDocs.length,
+      enabledUsers: enabledUserIds.length,
+    });
+
+    if (enabledUserIds.length === 0) {
+      logger.info('[NotificationGenCron] ⏭️  Daily summary skipped: no enabled users');
       return;
     }
 
     clearCache();
 
-    let totalCreated = 0;
-    let totalSkipped = 0;
+    // Call generator ONCE with all enabled userIds
+    const result = await generateDailySummaryNotifications({
+      enabledUserIds,
+    });
 
-    for (const settingsDoc of settingsDocs) {
-      try {
-        if (!isNotificationsEnabled(settingsDoc)) {
-          continue;
-        }
+    const elapsed = Date.now() - startTime;
 
-        const result = await generateDailySummaryNotifications({
-          settings: settingsDoc,
-        });
-
-        totalCreated += result.created;
-        totalSkipped += result.skipped;
-      } catch (error) {
-        logger.error('[NotificationGenCron] Failed to process daily summary', {
-          error: error.message,
-          userId: settingsDoc.userId,
-        });
-      }
-    }
-
-    if (totalCreated > 0 || totalSkipped > 0) {
-      logger.info('[NotificationGenCron] Daily summary run completed', {
-        created: totalCreated,
-        skipped: totalSkipped,
-      });
-    }
+    logger.info('[NotificationGenCron] ✅ Daily summary generator completed', {
+      created: result.created,
+      skipped: result.skipped,
+      enabledUsers: enabledUserIds.length,
+      elapsedMs: elapsed,
+    });
   } catch (error) {
-    logger.error('[NotificationGenCron] Daily summary generator failed', error);
+    const elapsed = Date.now() - startTime;
+    logger.error('[NotificationGenCron] ❌ Daily summary generator failed', {
+      error: error.message,
+      stack: error.stack,
+      elapsedMs: elapsed,
+    });
+  }
+}
+
+/**
+ * Run Daily Digest AM generator (09:00 IST)
+ * Morning brief: overdue + due today + due tomorrow
+ * IST is UTC+5:30, so 09:00 IST = 03:30 UTC
+ * Cron: '30 3 * * *' (03:30 UTC daily)
+ */
+async function runDailyDigestAM() {
+  const startTime = Date.now();
+  
+  try {
+    logger.info('[NotificationGenCron] ▶️  Daily Digest AM started');
+
+    const result = await generateDailyDigestAM();
+
+    const elapsed = Date.now() - startTime;
+
+    logger.info('[NotificationGenCron] ✅ Daily Digest AM completed', {
+      created: result.created,
+      skipped: result.skipped,
+      elapsedMs: elapsed,
+    });
+  } catch (error) {
+    const elapsed = Date.now() - startTime;
+    logger.error('[NotificationGenCron] ❌ Daily Digest AM failed', {
+      error: error.message,
+      stack: error.stack,
+      elapsedMs: elapsed,
+    });
+  }
+}
+
+/**
+ * Run Daily Digest EOD generator (20:30 IST)
+ * Day recap: completed today + still pending + tomorrow preview
+ * IST is UTC+5:30, so 20:30 IST = 15:00 UTC
+ * Cron: '0 15 * * *' (15:00 UTC daily)
+ */
+async function runDailyDigestEOD() {
+  const startTime = Date.now();
+  
+  try {
+    logger.info('[NotificationGenCron] ▶️  Daily Digest EOD started');
+
+    const result = await generateDailyDigestEOD();
+
+    const elapsed = Date.now() - startTime;
+
+    logger.info('[NotificationGenCron] ✅ Daily Digest EOD completed', {
+      created: result.created,
+      skipped: result.skipped,
+      elapsedMs: elapsed,
+    });
+  } catch (error) {
+    const elapsed = Date.now() - startTime;
+    logger.error('[NotificationGenCron] ❌ Daily Digest EOD failed', {
+      error: error.message,
+      stack: error.stack,
+      elapsedMs: elapsed,
+    });
   }
 }
 
@@ -181,7 +252,7 @@ async function runDailySummaryGenerator() {
  */
 function startNotificationGenerationCron() {
   // Prevent multiple instances
-  if (cronJob15min || cronJobDaily) {
+  if (cronJob15min || cronJobDaily || cronJobEOD) {
     logger.warn('[NotificationGenCron] Cron already running');
     return;
   }
@@ -191,14 +262,20 @@ function startNotificationGenerationCron() {
     await runNotificationGenerators();
   });
 
-  // Run daily at 09:00 IST (03:30 UTC): '30 3 * * *'
+  // Run Daily Digest AM at 09:00 IST (03:30 UTC): '30 3 * * *'
   cronJobDaily = cron.schedule('30 3 * * *', async () => {
-    await runDailySummaryGenerator();
+    await runDailyDigestAM();
+  });
+
+  // Run Daily Digest EOD at 20:30 IST (15:00 UTC): '0 15 * * *'
+  cronJobEOD = cron.schedule('0 15 * * *', async () => {
+    await runDailyDigestEOD();
   });
 
   logger.info('[NotificationGenCron] Started', {
     interval15min: '*/15 * * * *',
-    daily: '30 3 * * * (09:00 IST)',
+    digestAM: '30 3 * * * (09:00 IST)',
+    digestEOD: '0 15 * * * (20:30 IST)',
   });
 }
 
@@ -214,6 +291,10 @@ function stopNotificationGenerationCron() {
     cronJobDaily.stop();
     cronJobDaily = null;
   }
+  if (cronJobEOD) {
+    cronJobEOD.stop();
+    cronJobEOD = null;
+  }
   logger.info('[NotificationGenCron] Stopped');
 }
 
@@ -221,5 +302,7 @@ module.exports = {
   startNotificationGenerationCron,
   stopNotificationGenerationCron,
   runNotificationGenerators, // Exported for testing/dry-run
-  runDailySummaryGenerator, // Exported for testing/dry-run
+  runDailySummaryGenerator, // Exported for testing/dry-run (legacy)
+  runDailyDigestAM, // Exported for testing/dry-run
+  runDailyDigestEOD, // Exported for testing/dry-run
 };

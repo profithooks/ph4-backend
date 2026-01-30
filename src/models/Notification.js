@@ -41,6 +41,9 @@ const notificationSchema = new mongoose.Schema(
         'DEVICE_APPROVAL_REQUIRED',
         'DAILY_SUMMARY',
         'CREDIT_LIMIT_WARN',
+        // Daily digest kinds
+        'DAILY_DIGEST_AM',    // Morning digest (09:00 IST)
+        'DAILY_DIGEST_EOD',   // End of day digest (20:30 IST)
         // Legacy kinds (for backward compatibility)
         'FOLLOWUP',           // Follow-up reminder
         'PROMISE_REMINDER',   // Promise due reminder
