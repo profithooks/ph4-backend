@@ -47,6 +47,22 @@ async function leaseAttempts(limit = 20) {
   console.log('[NotificationWorker] DEBUG: Total attempts in DB:', totalAttempts);
   console.log('[NotificationWorker] DEBUG: Queued attempts:', queuedAttempts);
   
+  // Check what statuses exist
+  const statusCounts = await NotificationAttempt.aggregate([
+    {$group: {_id: '$status', count: {$sum: 1}}},
+  ]);
+  console.log('[NotificationWorker] DEBUG: Status breakdown:', JSON.stringify(statusCounts));
+  
+  // Get sample attempts to see their details
+  const sampleAttempts = await NotificationAttempt.find({}).limit(4).lean();
+  console.log('[NotificationWorker] DEBUG: Sample attempts:', JSON.stringify(sampleAttempts.map(a => ({
+    id: a._id,
+    channel: a.channel,
+    status: a.status,
+    nextAttemptAt: a.nextAttemptAt,
+    leasedUntil: a.leasedUntil,
+  }))));
+  
   // Find candidates
   const candidates = await NotificationAttempt.find(query)
     .sort({nextAttemptAt: 1}) // Oldest first (deterministic)
