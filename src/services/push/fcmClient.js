@@ -138,6 +138,8 @@ async function sendToTokens({tokens, title, body, data = {}}) {
   console.log('[FCMClient] Data stringified, building message...');
 
   try {
+    // TEMPORARY DEBUG: Send notification-only payload (no data)
+    // to test if data is interfering with display
     const message = {
       notification: {
         title,
@@ -146,16 +148,9 @@ async function sendToTokens({tokens, title, body, data = {}}) {
       // Android-specific options
       android: {
         priority: 'high',
-        notification: {
-          sound: 'default',
-        },
       },
       // APNs-specific options (iOS)
-      // Note: When using top-level 'notification', don't duplicate in aps.alert
       apns: {
-        headers: {
-          'apns-priority': '10',
-        },
         payload: {
           aps: {
             sound: 'default',
@@ -164,10 +159,7 @@ async function sendToTokens({tokens, title, body, data = {}}) {
       },
     };
     
-    // ONLY add data if it's not empty (data can interfere with notification display)
-    if (stringifiedData && Object.keys(stringifiedData).length > 0) {
-      message.data = stringifiedData;
-    }
+    console.log('[FCMClient] 📦 DEBUG: Sending notification-only (no data payload) to test');
 
     const multicastMessage = {
       tokens,
