@@ -17,24 +17,31 @@ let cronJob = null;
 function startNotificationDeliveryCron() {
   // Prevent multiple cron instances
   if (cronJob) {
+    console.log('[NotificationCron] WARNING: Cron already running');
     logger.warn('[NotificationCron] Cron already running');
     return;
   }
   
+  console.log('[NotificationCron] Starting notification delivery cron...');
+  
   // Run every 30 seconds: '*/30 * * * * *'
   cronJob = cron.schedule('*/30 * * * * *', async () => {
     try {
-      logger.debug('[NotificationCron] Running worker');
+      console.log('[NotificationCron] ⏰ Running worker cycle');
       const stats = await runWorker();
+      
+      console.log('[NotificationCron] Worker cycle complete:', stats);
       
       if (stats.processed > 0) {
         logger.info('[NotificationCron] Worker completed', stats);
       }
     } catch (error) {
+      console.error('[NotificationCron] ❌ Worker error:', error.message, error.stack);
       logger.error('[NotificationCron] Worker error', error);
     }
   });
   
+  console.log('[NotificationCron] ✅ Started successfully (runs every 30 seconds)');
   logger.info('[NotificationCron] Started (runs every 30 seconds)');
 }
 
