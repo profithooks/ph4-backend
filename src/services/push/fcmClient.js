@@ -143,7 +143,6 @@ async function sendToTokens({tokens, title, body, data = {}}) {
         title,
         body,
       },
-      data: stringifiedData,
       // Android-specific options
       android: {
         priority: 'high',
@@ -164,6 +163,11 @@ async function sendToTokens({tokens, title, body, data = {}}) {
         },
       },
     };
+    
+    // ONLY add data if it's not empty (data can interfere with notification display)
+    if (stringifiedData && Object.keys(stringifiedData).length > 0) {
+      message.data = stringifiedData;
+    }
 
     const multicastMessage = {
       tokens,
