@@ -11,6 +11,7 @@ const FollowUpTask = require('../../../models/FollowUpTask');
 const Notification = require('../../../models/Notification');
 const {getIstDayWindow, getIstTomorrowWindow} = require('../../../utils/istWindow');
 const {selectChannels} = require('../channelSelector');
+const {createNotification} = require('../../notificationService');
 const logger = require('../../../utils/logger');
 
 /**
@@ -304,9 +305,9 @@ async function generateDailyDigestAM({date = new Date()} = {}) {
           },
         };
 
-        // Create notification (idempotent)
+        // Create notification with delivery attempts
         try {
-          await Notification.create({
+          await createNotification({
             userId,
             businessId,
             customerId: null,
@@ -426,9 +427,9 @@ async function generateDailyDigestEOD({date = new Date()} = {}) {
           },
         };
 
-        // Create notification (idempotent)
+        // Create notification with delivery attempts
         try {
-          await Notification.create({
+          await createNotification({
             userId,
             businessId,
             customerId: null,
