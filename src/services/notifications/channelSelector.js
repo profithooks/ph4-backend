@@ -38,7 +38,10 @@ async function userHasFcmTokens(userId) {
 
   try {
     // Check if Firebase is configured
-    if (!isFirebaseConfigured()) {
+    const firebaseConfigured = isFirebaseConfigured();
+    console.log('[ChannelSelector] DEBUG: Firebase configured:', firebaseConfigured);
+    
+    if (!firebaseConfigured) {
       _userTokenCache[userId] = false;
       return false;
     }
@@ -49,6 +52,8 @@ async function userHasFcmTokens(userId) {
       status: 'TRUSTED',
       fcmToken: {$ne: null, $exists: true},
     });
+
+    console.log('[ChannelSelector] DEBUG: Device count for userId', userId, ':', deviceCount);
 
     const hasTokens = deviceCount > 0;
     _userTokenCache[userId] = hasTokens;
@@ -75,11 +80,18 @@ async function userHasFcmTokens(userId) {
 async function selectChannels(userId) {
   const channels = ['IN_APP'];
   
+  console.log('[ChannelSelector] DEBUG: Checking channels for userId:', userId);
+  
   // Add PUSH if Firebase configured and user has tokens
   const hasTokens = await userHasFcmTokens(userId);
+  
+  console.log('[ChannelSelector] DEBUG: hasTokens:', hasTokens);
+  
   if (hasTokens) {
     channels.push('PUSH');
   }
+  
+  console.log('[ChannelSelector] DEBUG: Selected channels:', channels);
   
   return channels;
 }
