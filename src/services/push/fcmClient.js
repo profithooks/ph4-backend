@@ -109,11 +109,19 @@ function classifyError(errorCode) {
  * @returns {Promise<Object>} Normalized result
  */
 async function sendToTokens({tokens, title, body, data = {}}) {
+  console.log('[FCMClient] 🎯 sendToTokens CALLED - Entry point', {
+    tokensLength: tokens?.length,
+    hasTitle: !!title,
+    hasBody: !!body,
+  });
+  
   if (!_isInitialized) {
+    console.log('[FCMClient] Firebase not initialized - initializing now');
     initializeFirebase();
   }
 
   if (!tokens || tokens.length === 0) {
+    console.log('[FCMClient] ⚠️ No tokens provided - returning early');
     return {
       successCount: 0,
       failureCount: 0,
@@ -126,6 +134,8 @@ async function sendToTokens({tokens, title, body, data = {}}) {
   for (const [key, value] of Object.entries(data)) {
     stringifiedData[key] = stringifyDataValue(value);
   }
+  
+  console.log('[FCMClient] Data stringified, building message...');
 
   try {
     const message = {
