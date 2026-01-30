@@ -166,6 +166,14 @@ async function sendToTokens({tokens, title, body, data = {}}) {
     };
 
     // Log the exact message being sent
+    console.log('[FCMClient] 🚀 Sending FCM message to Firebase:', {
+      tokenCount: tokens.length,
+      notification: message.notification,
+      dataKeys: Object.keys(stringifiedData),
+      hasAndroidConfig: !!message.android,
+      hasApnsConfig: !!message.apns,
+    });
+    
     logger.info('[FCMClient] Sending FCM message', {
       tokenCount: tokens.length,
       message: {
@@ -179,6 +187,17 @@ async function sendToTokens({tokens, title, body, data = {}}) {
     const response = await admin.messaging().sendEachForMulticast(multicastMessage);
 
     // Log the raw Firebase response
+    console.log('[FCMClient] ✅ Firebase response received:', {
+      successCount: response.successCount,
+      failureCount: response.failureCount,
+      responses: response.responses.map((r, idx) => ({
+        token: tokens[idx].substring(0, 20) + '...',
+        success: r.success,
+        messageId: r.messageId || null,
+        errorCode: r.error?.code || null,
+      })),
+    });
+    
     logger.info('[FCMClient] Raw Firebase response received', {
       successCount: response.successCount,
       failureCount: response.failureCount,
