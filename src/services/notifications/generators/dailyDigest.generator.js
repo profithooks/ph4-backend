@@ -307,7 +307,9 @@ async function generateDailyDigestAM({date = new Date()} = {}) {
 
         // Create notification with delivery attempts
         try {
-          await createNotification({
+          console.log('[DailyDigestAM] DEBUG: About to call createNotification for userId:', userId);
+          
+          const result = await createNotification({
             userId,
             businessId,
             customerId: null,
@@ -319,8 +321,15 @@ async function generateDailyDigestAM({date = new Date()} = {}) {
             idempotencyKey,
           });
 
+          console.log('[DailyDigestAM] DEBUG: createNotification returned:', {
+            notificationId: result.notification?._id,
+            attemptCount: result.attempts?.length,
+          });
+
           created++;
         } catch (error) {
+          console.error('[DailyDigestAM] ERROR in createNotification:', error.message, error.stack);
+          
           if (error.code === 11000) {
             // Duplicate key - already created today
             skipped++;
@@ -429,7 +438,9 @@ async function generateDailyDigestEOD({date = new Date()} = {}) {
 
         // Create notification with delivery attempts
         try {
-          await createNotification({
+          console.log('[DailyDigestEOD] DEBUG: About to call createNotification for userId:', userId);
+          
+          const result = await createNotification({
             userId,
             businessId,
             customerId: null,
@@ -441,8 +452,15 @@ async function generateDailyDigestEOD({date = new Date()} = {}) {
             idempotencyKey,
           });
 
+          console.log('[DailyDigestEOD] DEBUG: createNotification returned:', {
+            notificationId: result.notification?._id,
+            attemptCount: result.attempts?.length,
+          });
+
           created++;
         } catch (error) {
+          console.error('[DailyDigestEOD] ERROR in createNotification:', error.message, error.stack);
+          
           if (error.code === 11000) {
             // Duplicate key - already created today
             skipped++;
