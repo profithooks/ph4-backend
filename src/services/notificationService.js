@@ -46,15 +46,41 @@ async function createNotification({
       });
       
       if (notification) {
-        logger.info('[NotificationService] Idempotent duplicate detected', {
+        console.log('[NotificationService] DEBUG: Idempotent duplicate detected', {
           notificationId: notification._id,
           idempotencyKey,
         });
         
         // Return existing with its attempts
-        const attempts = await NotificationAttempt.find({
+        let attempts = await NotificationAttempt.find({
           notificationId: notification._id,
         });
+        
+        console.log('[NotificationService] DEBUG: Existing attempts found:', attempts.length);
+        
+        // BACKFILL: If notification exists but has no attempts, create them now
+        // This handles notifications created by old code before the fix
+        if (attempts.length === 0 && notification.channels && notification.channels.length > 0) {
+          console.log('[NotificationService] DEBUG: Backfilling missing attempts for existing notification');
+          
+          for (const channel of notification.channels) {
+            try {
+              const attempt = await NotificationAttempt.create({
+                notificationId: notification._id,
+                channel,
+                status: 'QUEUED',
+                attemptNo: 0,
+                nextAttemptAt: new Date(),
+              });
+              
+              attempts.push(attempt);
+              
+              console.log('[NotificationService] DEBUG: Backfilled attempt for channel:', channel);
+            } catch (backfillError) {
+              console.error('[NotificationService] ERROR backfilling attempt:', backfillError.message);
+            }
+          }
+        }
         
         return {notification, attempts};
       }
