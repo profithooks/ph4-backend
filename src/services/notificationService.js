@@ -82,23 +82,39 @@ async function createNotification({
     // Create delivery attempts for each channel
     const attempts = [];
     
+    console.log('[NotificationService] DEBUG: About to create attempts for channels:', channels);
+    console.log('[NotificationService] DEBUG: Notification ID:', notification._id);
+    
     for (const channel of channels) {
-      const attempt = await NotificationAttempt.create({
-        notificationId: notification._id,
-        channel,
-        status: 'QUEUED',
-        attemptNo: 0,
-        nextAttemptAt: new Date(), // Deliver immediately
-      });
+      console.log('[NotificationService] DEBUG: Creating attempt for channel:', channel);
       
-      attempts.push(attempt);
-      
-      logger.debug('[NotificationService] Attempt created', {
-        attemptId: attempt._id,
-        notificationId: notification._id,
-        channel,
-      });
+      try {
+        const attempt = await NotificationAttempt.create({
+          notificationId: notification._id,
+          channel,
+          status: 'QUEUED',
+          attemptNo: 0,
+          nextAttemptAt: new Date(), // Deliver immediately
+        });
+        
+        console.log('[NotificationService] DEBUG: Attempt created successfully:', {
+          attemptId: attempt._id,
+          channel,
+        });
+        
+        attempts.push(attempt);
+        
+        logger.debug('[NotificationService] Attempt created', {
+          attemptId: attempt._id,
+          notificationId: notification._id,
+          channel,
+        });
+      } catch (attemptError) {
+        console.error('[NotificationService] ERROR creating attempt for channel:', channel, attemptError.message, attemptError.stack);
+      }
     }
+    
+    console.log('[NotificationService] DEBUG: Total attempts created:', attempts.length);
     
     return {notification, attempts};
   } catch (error) {
