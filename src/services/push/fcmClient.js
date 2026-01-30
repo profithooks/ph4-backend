@@ -164,7 +164,6 @@ async function sendToTokens({tokens, title, body, data = {}}) {
             },
             sound: 'default',
             badge: 1,
-            'content-available': 1,
           },
         },
       },
