@@ -322,6 +322,7 @@ const validateCSV = (csvContent) => {
         valid: false,
         error: 'CSV file is empty',
         rowCount: 0,
+        validCount: 0,
         previewRows: [],
       };
     }
@@ -335,14 +336,29 @@ const validateCSV = (csvContent) => {
         valid: false,
         error: 'CSV must have a "name" column',
         rowCount: rows.length,
+        validCount: 0,
         previewRows: [],
       };
     }
     
-    // Validate first 10 rows
-    const previewRows = [];
-    const errors = [];
+    // Validate ALL rows to get accurate validCount
+    let validCount = 0;
+    const allErrors = [];
     
+    for (let i = 0; i < rows.length; i++) {
+      const validation = validateCustomerRow(rows[i], i + 1);
+      if (validation.valid) {
+        validCount++;
+      } else {
+        allErrors.push({
+          rowIndex: i + 1,
+          error: validation.error,
+        });
+      }
+    }
+    
+    // Generate preview rows (first 10) for UI display
+    const previewRows = [];
     for (let i = 0; i < Math.min(10, rows.length); i++) {
       const validation = validateCustomerRow(rows[i], i + 1);
       previewRows.push({
@@ -352,26 +368,21 @@ const validateCSV = (csvContent) => {
         valid: validation.valid,
         error: validation.error,
       });
-      
-      if (!validation.valid) {
-        errors.push({
-          rowIndex: i + 1,
-          error: validation.error,
-        });
-      }
     }
     
     return {
-      valid: errors.length === 0,
+      valid: validCount > 0, // Valid if at least one row is valid
       rowCount: rows.length,
-      previewRows,
-      errors: errors.length > 0 ? errors : undefined,
+      validCount, // Total valid rows across entire CSV
+      previewRows, // First 10 rows for display
+      errors: allErrors.length > 0 ? allErrors.slice(0, 10) : undefined, // First 10 errors
     };
   } catch (error) {
     return {
       valid: false,
       error: error.message || 'Failed to parse CSV',
       rowCount: 0,
+      validCount: 0,
       previewRows: [],
     };
   }

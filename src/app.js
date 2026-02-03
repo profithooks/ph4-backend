@@ -48,6 +48,7 @@ const backupRoutes = require('./routes/backup.routes');
 const publicBillRoutes = require('./routes/publicBill.routes');
 const webhookRoutes = require('./routes/webhook.routes');
 const statsRoutes = require('./routes/stats.routes');
+const expenseRoutes = require('./routes/expense.routes');
 
 // Step 23: Go-Live & Rollout Control middleware
 const {checkGlobalKillSwitch, checkFeatureKillSwitches} = require('./middleware/killSwitch.middleware');
@@ -143,6 +144,7 @@ app.use('/api/v1/dev/notifications', devNotificationsRoutes); // Dev notificatio
 app.use('/api/v1/dev', specComplianceRoutes); // Has catch-all, so mount last
 app.use('/api/v1/backup', backupRoutes);
 app.use('/api/v1/stats', statsRoutes);
+app.use('/api/v1/expenses', expenseRoutes);
 
 // Public routes (outside /api prefix, no auth required)
 app.use('/public', publicBillRoutes);

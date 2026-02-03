@@ -427,8 +427,35 @@ const deleteCustomer = asyncHandler(async (req, res) => {
 // @route   POST /api/v1/customers/import
 // @access  Private
 const importCustomersFromCSV = asyncHandler(async (req, res) => {
+  // Strict guards: prevent null reference errors
+  if (!req.user || !req.user._id) {
+    logger.error('[IMPORT_CUSTOMERS]', {
+      requestId: req.id,
+      error: 'AUTH_REQUIRED',
+      user: req.user,
+    });
+    throw new AppError(
+      'Authentication required',
+      401,
+      'AUTH_REQUIRED'
+    );
+  }
+  
   const userId = req.user._id;
   const businessId = req.user.businessId || userId;
+  
+  if (!businessId) {
+    logger.error('[IMPORT_CUSTOMERS]', {
+      requestId: req.id,
+      user: userId,
+      error: 'BUSINESS_REQUIRED',
+    });
+    throw new AppError(
+      'Business context required',
+      400,
+      'BUSINESS_REQUIRED'
+    );
+  }
   
   // Handle multipart/form-data (file upload) or raw CSV text
   let csvContent;
@@ -465,45 +492,89 @@ const importCustomersFromCSV = asyncHandler(async (req, res) => {
     previewLimit: parseInt(req.body.previewLimit, 10) || 10,
   };
   
+  logger.info('[IMPORT_CUSTOMERS][START]', { requestId: req.id, userId, businessId });
+  
   // Import customers
-  const result = await importCustomers({
-    userId,
-    csvContent,
-    options,
-  });
-  
-  // Audit log for import action
-  logger.info('[CustomerImport] Import completed', {
-    userId,
-    businessId,
-    totalRows: result.totalRows,
-    importedCount: result.importedCount,
-    skippedCount: result.skippedCount,
-    updatedCount: result.updatedCount,
-    errorCount: result.errorCount,
-    requestId: req.requestId,
-  });
-  
-  // Create audit event
-  await auditCreate({
-    action: 'CUSTOMERS_IMPORTED',
-    actorUserId: userId,
-    actorRole: getUserRole(req),
-    entityType: 'CUSTOMER',
-    entity: null,
-    businessId,
-    metadata: {
+  let result;
+  try {
+    logger.info('[IMPORT_CUSTOMERS][BEFORE_IMPORT]', { requestId: req.id });
+    
+    result = await importCustomers({
+      userId,
+      csvContent,
+      options,
+    });
+    
+    logger.info('[IMPORT_CUSTOMERS][AFTER_IMPORT]', {
+      requestId: req.id,
       totalRows: result.totalRows,
       importedCount: result.importedCount,
-      skippedCount: result.skippedCount,
-      updatedCount: result.updatedCount,
       errorCount: result.errorCount,
-      importedCustomerIds: result.imported.map(c => c.customerId),
-    },
-    requestId: req.requestId,
-  });
-  
-  res.success(result, 200);
+    });
+    
+    // Create audit event (wrapped to prevent crash after successful import)
+    try {
+      logger.info('[IMPORT_CUSTOMERS][BEFORE_AUDIT]', { requestId: req.id });
+      
+      // Guard: filter out null entries and safely extract customerIds
+      const importedIds = (result.imported || [])
+        .filter(c => c && c.customerId)
+        .map(c => c.customerId);
+      
+      await auditCreate({
+        action: 'CUSTOMERS_IMPORTED',
+        actorUserId: userId,
+        actorRole: getUserRole(req),
+        entityType: 'CUSTOMER',
+        entity: null,
+        businessId,
+        metadata: {
+          totalRows: result.totalRows || 0,
+          importedCount: result.importedCount || 0,
+          skippedCount: result.skippedCount || 0,
+          updatedCount: result.updatedCount || 0,
+          errorCount: result.errorCount || 0,
+          importedCustomerIds: importedIds,
+        },
+        requestId: req.id,
+      });
+      
+      logger.info('[IMPORT_CUSTOMERS][AFTER_AUDIT]', { requestId: req.id });
+    } catch (auditErr) {
+      // Log audit failure but don't crash - import already succeeded
+      logger.error('[IMPORT_CUSTOMERS][AUDIT_FAILED]', {
+        requestId: req.id,
+        err: auditErr?.message,
+        stack: auditErr?.stack,
+      });
+    }
+    
+    logger.info('[IMPORT_CUSTOMERS][BEFORE_RESPONSE]', { requestId: req.id });
+    
+    // Always return 200 with stable payload (import succeeded)
+    res.success({
+      totalRows: result.totalRows || 0,
+      importedCount: result.importedCount || 0,
+      skippedCount: result.skippedCount || 0,
+      updatedCount: result.updatedCount || 0,
+      errorCount: result.errorCount || 0,
+      imported: result.imported || [],
+      skipped: result.skipped || [],
+      updated: result.updated || [],
+      errors: result.errors || [],
+    }, 200);
+    
+  } catch (err) {
+    logger.error('[IMPORT_CUSTOMERS][FAIL]', {
+      requestId: req.id,
+      user: userId,
+      businessId,
+      count: csvContent?.split('\n').length,
+      err: err?.message,
+      stack: err?.stack,
+    });
+    throw err;
+  }
 });
 
 // @desc    Validate CSV format (preview without importing)

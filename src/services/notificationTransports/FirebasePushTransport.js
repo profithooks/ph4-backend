@@ -134,11 +134,10 @@ class FirebasePushTransport extends BaseTransport {
           notificationId: notification._id,
         });
 
-        // Return success but with no tokens (not an error, just no recipients)
-        return {
-          ok: true,
-          providerMessageId: `fcm_no_tokens_${notification._id}`,
-        };
+        const error = new Error('No TRUSTED devices with FCM token for this user');
+        error.code = 'NO_TRUSTED_FCM_DEVICE';
+        error.retryable = false;
+        throw error;
       }
 
       const tokens = devices.map(d => d.fcmToken).filter(Boolean);
@@ -152,10 +151,10 @@ class FirebasePushTransport extends BaseTransport {
           deviceCount: devices.length,
         });
 
-        return {
-          ok: true,
-          providerMessageId: `fcm_no_tokens_${notification._id}`,
-        };
+        const error = new Error('No TRUSTED devices with FCM token for this user');
+        error.code = 'NO_TRUSTED_FCM_DEVICE';
+        error.retryable = false;
+        throw error;
       }
 
       // Get title/body

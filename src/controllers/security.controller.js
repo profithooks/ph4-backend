@@ -294,6 +294,26 @@ const registerPushToken = asyncHandler(async (req, res) => {
     });
   }
 
+  if (device.status === 'PENDING') {
+    const autoTrust = (process.env.AUTO_TRUST_FIRST_DEVICE ?? 'true') === 'true';
+
+    if (autoTrust) {
+      const trustedCount = await Device.countDocuments({userId, status: 'TRUSTED'});
+
+      if (trustedCount === 0) {
+        device.status = 'TRUSTED';
+        device.approvedBy = userId;
+        device.approvedAt = new Date();
+
+        console.log('[Security] Auto-trusted first device for push', {
+          requestId,
+          userId,
+          deviceId: device.deviceId,
+        });
+      }
+    }
+  }
+
   // Check device status - do not allow token registration for BLOCKED devices
   if (device.status === 'BLOCKED') {
     throw new AppError('Device is blocked and cannot register push token', 403, 'DEVICE_NOT_TRUSTED');

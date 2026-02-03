@@ -214,6 +214,13 @@ async function processAttempt(attempt) {
       user,
       customer,
     });
+
+    if (!result || result.ok !== true) {
+      const error = new Error('Transport returned ok=false');
+      error.code = 'TRANSPORT_NOT_OK';
+      error.retryable = result && result.retryable === false ? false : true;
+      throw error;
+    }
     
     console.log('[NotificationWorker] ✅ Transport.send() returned:', {
       ok: result.ok,
